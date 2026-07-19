@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Phase } from "../lib/engine";
+import { PROFILES, type Phase } from "../lib/engine";
 
 /**
  * Automotive-cluster speedometer.
@@ -30,7 +30,7 @@ function arcPath(fromDeg: number, toDeg: number, r: number): string {
 }
 
 /** Pick a dial max that keeps the needle in a useful range. */
-export function dialMax(peak: number): number {
+function dialMax(peak: number): number {
   for (const m of [100, 240, 500, 1000, 2500, 10000]) {
     if (peak <= m * 0.96) return m;
   }
@@ -43,12 +43,16 @@ export default function Speedometer({
   idlePingMs,
   dataUsedMB,
   finalScore,
+  lowData,
+  onScoreClick,
 }: {
   liveMbps: number | null;
   phase: Phase;
   idlePingMs: number | undefined;
   dataUsedMB: number;
   finalScore: number | null;
+  lowData: boolean;
+  onScoreClick?: () => void;
 }) {
   const [display, setDisplay] = useState(0);
   const [max, setMax] = useState(240);
@@ -139,14 +143,24 @@ export default function Speedometer({
         ? String(Math.round(shown))
         : shown.toFixed(1);
 
+  // Gear = test phase, labeled with the stream count that actually runs.
+  const profile = lowData ? PROFILES.lowData : PROFILES.full;
   const gear =
-    phase === "download" ? "D3" : phase === "upload" ? "U2" : phase === "latency" ? "P" : phase === "done" ? "N" : "—";
+    phase === "download"
+      ? `D${profile.dlStreams}`
+      : phase === "upload"
+        ? `U${profile.ulStreams}`
+        : phase === "latency"
+          ? "P"
+          : phase === "done"
+            ? "N"
+            : "—";
 
   // Redline: top 8% of the dial.
   const redFrom = START_DEG + SWEEP_DEG * 0.92;
 
-  // Data bar: relative to a ~400 MB full test.
-  const dataFrac = Math.min(dataUsedMB / 400, 1);
+  // Data bar: relative to the typical footprint of the current mode.
+  const dataFrac = Math.min(dataUsedMB / (lowData ? 40 : 400), 1);
 
   return (
     <div className="speedo">
@@ -207,7 +221,13 @@ export default function Speedometer({
         </div>
         <div className="speedo__unit">MBPS</div>
         {finalScore !== null && phase === "done" && (
-          <div className="speedo__score">health {finalScore}/100</div>
+          <button
+            className="speedo__score"
+            onClick={onScoreClick}
+            title="See how this score is calculated"
+          >
+            health {finalScore}/100 ⓘ
+          </button>
         )}
       </div>
 

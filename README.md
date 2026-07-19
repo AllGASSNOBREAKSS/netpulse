@@ -60,28 +60,45 @@ plain-English diagnosis, and prioritized fixes.
 
 ## Features
 
-- 📡 Real measurement engine — no fabricated numbers
+- 📡 Real measurement engine — every displayed metric is measured or derived
+  from measurements; anything that can't be measured says so (see packet loss)
 - 🏎️ Animated automotive speedometer — spring-physics needle, auto-scaling dial
-  (240 → 500 → 1000+ Mbps), redline zone, phase "gear" indicator, data-used fuel bar
-- 🧭 Dashboard sidebar: Speed test · Latency monitor · Connections · Vulnerabilities · History
+  (240 → 500 → 1000+ Mbps), redline zone, phase "gear" indicator showing the
+  stream count that actually ran, data-used fuel bar
+- 🔍 Interactive metric cards — click any of the 11 metrics for what it means,
+  how it was measured, your result, healthy ranges, raw samples, and a
+  recommended next action
+- 🧮 Transparent health score — the formula lives in one documented file
+  ([`src/lib/scoring.ts`](src/lib/scoring.ts)); click the score for a full
+  per-component breakdown with weights
+- 🧭 Collapsible dashboard sidebar: Speed test · Latency monitor · Devices ·
+  Connection & Privacy · History
 - 📉 Live latency monitor — continuous 500 ms probes with spike/drop detection,
   run it while you game or join calls
-- 🕵️ Exposure panel — your public IP, nearest edge, TLS version, and Cloudflare
-  WARP detection, measured live
-- 🩺 Health score, activity grades, and a written diagnosis
+- 🔒 Connection & Privacy panel — public IP (masked by default, reveal on
+  demand), nearest edge, TLS/HTTP version, WARP detection — presented as
+  neutral connection facts, not scare-words
+- 🩺 Activity grades and a written diagnosis with a "don't waste money on" callout
 - 🧾 Local test history (stored in your browser, never uploaded)
 - 🪫 Low-data mode — caps a full test from ~240 MB down to ~35 MB for metered connections
-- ♿ Responsive, keyboard-accessible, honors `prefers-reduced-motion`
+- ♿ Responsive (desktop/tablet/mobile), keyboard-accessible, honors `prefers-reduced-motion`
 
 ## Honest limitations
 
 - **Packet loss isn't shown.** Browsers can't measure it reliably without a
-  special server protocol, so it's deliberately omitted rather than faked.
+  special server protocol, so it's deliberately omitted rather than faked. The
+  packet-loss card explains this and points to an OS-level alternative.
 - The browser can't read Wi-Fi radio details (SSID, band, signal strength) —
   that would need a native companion app. NetPulse tests the *connection*, not
   the radio.
-- Results depend on the test server and your device; treat them as a consistent
-  relative baseline, not an absolute truth.
+- Low-data mode on fast connections hits its byte caps quickly, so
+  latency-under-load figures rest on fewer probes — the app tells you when
+  that happened. Run a full test for solid numbers.
+- Results depend on the test server (Cloudflare's nearest edge) and your
+  device; treat them as a consistent relative baseline, not an absolute truth.
+
+A full audit of the codebase — architecture, measurement sources, what was
+found and fixed, and remaining limitations — lives in [AUDIT.md](AUDIT.md).
 
 ## Getting started
 

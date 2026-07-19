@@ -1,7 +1,9 @@
 import { useCallback, useRef, useState } from "react";
 import Speedometer from "./components/Speedometer";
-import { Connections, LatencyMonitor, Vulnerabilities } from "./components/Panels";
+import { ConnectionPrivacy, Devices, LatencyMonitor } from "./components/Panels";
+import { MetricDetail, ScoreDetail } from "./components/MetricDetail";
 import { runTest, type Phase, type TestResult } from "./lib/engine";
+import { METRICS } from "./lib/metrics";
 import { judge, type Verdict } from "./lib/verdict";
 
 /* ---- History (localStorage) ------------------------------------------------ */
@@ -17,6 +19,7 @@ type HistoryEntry = {
 };
 
 const HISTORY_KEY = "netpulse_history";
+const SIDEBAR_KEY = "netpulse_sidebar";
 
 function loadHistory(): HistoryEntry[] {
   try {
@@ -33,9 +36,9 @@ function saveHistory(entries: HistoryEntry[]) {
 }
 
 /* ---- Navigation ------------------------------------------------------------ */
-type View = "speed" | "latency" | "connections" | "vulns" | "history";
+type View = "speed" | "latency" | "devices" | "privacy" | "history";
 
-const NAV: { view: View; label: string; icon: JSX.Element; soon?: boolean }[] = [
+const NAV: { view: View; label: string; icon: JSX.Element }[] = [
   {
     view: "speed",
     label: "Speed test",
@@ -56,8 +59,8 @@ const NAV: { view: View; label: string; icon: JSX.Element; soon?: boolean }[] = 
     ),
   },
   {
-    view: "connections",
-    label: "Connections",
+    view: "devices",
+    label: "Devices",
     icon: (
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
         <circle cx="8" cy="12.5" r="1.2" fill="currentColor" stroke="none" />
@@ -66,8 +69,8 @@ const NAV: { view: View; label: string; icon: JSX.Element; soon?: boolean }[] = 
     ),
   },
   {
-    view: "vulns",
-    label: "Vulnerabilities",
+    view: "privacy",
+    label: "Connection & Privacy",
     icon: (
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
         <path d="M8 1.5 13.5 4v4c0 3.2-2.3 5.6-5.5 6.5C4.8 13.6 2.5 11.2 2.5 8V4L8 1.5Z" strokeLinejoin="round" />
@@ -98,6 +101,7 @@ const PHASE_LABEL: Record<Phase, string> = {
 /* ---- App ------------------------------------------------------------------- */
 export default function App() {
   const [view, setView] = useState<View>("speed");
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(SIDEBAR_KEY) === "1");
   const [phase, setPhase] = useState<Phase>("idle");
   const [live, setLive] = useState<Partial<TestResult>>({});
   const [result, setResult] = useState<TestResult | null>(null);
@@ -106,10 +110,21 @@ export default function App() {
   const [lowData, setLowData] = useState(false);
   const [liveMbps, setLiveMbps] = useState<number | null>(null);
   const [dataMB, setDataMB] = useState(0);
+  const [openMetric, setOpenMetric] = useState<string | null>(null);
+  const [showScore, setShowScore] = useState(false);
   const runningRef = useRef(false);
   const dataRef = useRef(0);
 
   const running = phase === "latency" || phase === "download" || phase === "upload";
+
+  const toggleSidebar = useCallback(() => {
+    setCollapsed((c) => {
+      try {
+        localStorage.setItem(SIDEBAR_KEY, c ? "0" : "1");
+      } catch {}
+      return !c;
+    });
+  }, []);
 
   const start = useCallback(async () => {
     if (runningRef.current) return;
@@ -163,13 +178,36 @@ export default function App() {
     }
   }, [lowData]);
 
+  const openDef = openMetric ? METRICS.find((m) => m.id === openMetric) : null;
+
   return (
-    <div className="app">
+    <div className="app" data-collapsed={collapsed || undefined}>
       {/* ---- Sidebar ---- */}
       <aside className="sidebar">
-        <div className="brand">
-          net<span>pulse</span>
-          <em className="brand__tag">internet health console</em>
+        <div className="sidebar__top">
+          <div className="brand">
+            <span className="brand__full">
+              net<span className="brand__accent">pulse</span>
+            </span>
+            <span className="brand__mini" aria-hidden="true">
+              n<span className="brand__accent">p</span>
+            </span>
+            <em className="brand__tag">internet health console</em>
+          </div>
+          <button
+            className="collapse-btn"
+            onClick={toggleSidebar}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+              {collapsed ? (
+                <path d="M6 3.5 10.5 8 6 12.5" strokeLinecap="round" strokeLinejoin="round" />
+              ) : (
+                <path d="M10 3.5 5.5 8 10 12.5" strokeLinecap="round" strokeLinejoin="round" />
+              )}
+            </svg>
+          </button>
         </div>
 
         <nav className="nav">
@@ -188,14 +226,14 @@ export default function App() {
         </nav>
 
         <div className="sidebar__foot">
-          <label className="lowdata">
+          <label className="lowdata" title="Cap the test at ~35 MB for metered connections">
             <input
               type="checkbox"
               checked={lowData}
               onChange={(e) => setLowData(e.target.checked)}
               disabled={running}
             />
-            low-data mode
+            <span className="lowdata__text">low-data mode</span>
           </label>
           <div className="sidebar__note">
             Full test moves ~100–400&nbsp;MB.
@@ -216,8 +254,10 @@ export default function App() {
                 idlePingMs={live.idlePingMs}
                 dataUsedMB={dataMB}
                 finalScore={verdict?.score ?? null}
+                lowData={lowData}
+                onScoreClick={() => setShowScore(true)}
               />
-              <div className="stage__status">
+              <div className="stage__status" role="status">
                 {running && <span className="pulse-dot" aria-hidden="true" />}
                 {PHASE_LABEL[phase]}
                 {result && verdict && <strong> — {verdict.headline}</strong>}
@@ -227,34 +267,33 @@ export default function App() {
               </button>
             </section>
 
+            <p className="metrics__hint">Click any metric to see what it means and how it was measured.</p>
             <section className="metrics">
-              <Metric label="Download" value={live.downloadMbps} unit="Mbps" hot={phase === "download"} />
-              <Metric label="Upload" value={live.uploadMbps} unit="Mbps" hot={phase === "upload"} />
-              <Metric label="Idle ping" value={live.idlePingMs} unit="ms" precision={0} />
-              <Metric
-                label="Loaded ping"
-                value={
-                  live.loadedUpPingMs !== undefined || live.loadedDownPingMs !== undefined
-                    ? Math.max(live.loadedDownPingMs ?? 0, live.loadedUpPingMs ?? 0)
-                    : undefined
-                }
-                unit="ms"
-                precision={0}
-              />
-              <Metric label="Jitter" value={live.idleJitterMs} unit="ms" precision={1} />
-              <div className="metric">
-                <div className="metric__label">Bufferbloat</div>
-                <div className="metric__value">
-                  {result ? (
-                    <span className={`bloat bloat--${result.bufferbloatGrade}`}>{result.bufferbloatGrade}</span>
-                  ) : (
-                    <span className="metric__idle">—</span>
-                  )}
-                </div>
-                <div className="metric__sub">
-                  {result ? `+${Math.round(result.bufferbloatMs)}ms under load` : "latency rise under load"}
-                </div>
-              </div>
+              {METRICS.map((m) => {
+                const v = m.value(result ?? live);
+                const sub = m.sub ? m.sub(result ?? live) : null;
+                return (
+                  <button
+                    key={m.id}
+                    className="metric"
+                    data-hot={(running && m.hotPhase === phase) || undefined}
+                    data-na={m.unavailable ? true : undefined}
+                    onClick={() => setOpenMetric(m.id)}
+                  >
+                    <div className="metric__label">{m.name}</div>
+                    <div className="metric__value">
+                      {m.unavailable ? (
+                        <span className="metric__na">n/a</span>
+                      ) : v !== null ? (
+                        v
+                      ) : (
+                        <span className="metric__idle">—</span>
+                      )}
+                    </div>
+                    <div className="metric__sub">{m.unavailable ? "not measurable in-browser" : sub ?? " "}</div>
+                  </button>
+                );
+              })}
             </section>
 
             {verdict && result && (
@@ -305,15 +344,16 @@ export default function App() {
             )}
 
             <footer className="foot">
-              Tests run against Cloudflare's speed endpoints from your browser — every number on
-              the dial is measured, never simulated.
+              Speed and latency are measured live against Cloudflare's speed endpoints from your
+              browser. Packet loss can't be measured reliably by a web page, so NetPulse doesn't
+              show it. Results depend on your device and the network path to the test server.
             </footer>
           </>
         )}
 
         {view === "latency" && <LatencyMonitor />}
-        {view === "connections" && <Connections />}
-        {view === "vulns" && <Vulnerabilities />}
+        {view === "devices" && <Devices />}
+        {view === "privacy" && <ConnectionPrivacy />}
 
         {view === "history" && (
           <div className="panel">
@@ -374,6 +414,12 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* ---- Detail panels ---- */}
+      {openDef && <MetricDetail def={openDef} result={result} onClose={() => setOpenMetric(null)} />}
+      {showScore && verdict && (
+        <ScoreDetail score={verdict.score} parts={verdict.breakdown} onClose={() => setShowScore(false)} />
+      )}
     </div>
   );
 }
@@ -388,39 +434,14 @@ function NavItem({
   onSelect: (v: View) => void;
 }) {
   return (
-    <button className="nav__item" data-active={active || undefined} onClick={() => onSelect(item.view)}>
+    <button
+      className="nav__item"
+      data-active={active || undefined}
+      onClick={() => onSelect(item.view)}
+      title={item.label}
+    >
       <span className="nav__icon">{item.icon}</span>
-      {item.label}
+      <span className="nav__text">{item.label}</span>
     </button>
-  );
-}
-
-function Metric({
-  label,
-  value,
-  unit,
-  precision = 1,
-  hot,
-}: {
-  label: string;
-  value: number | undefined;
-  unit: string;
-  precision?: number;
-  hot?: boolean;
-}) {
-  return (
-    <div className="metric" data-hot={hot || undefined}>
-      <div className="metric__label">{label}</div>
-      <div className="metric__value">
-        {value !== undefined ? (
-          <>
-            {value >= 100 ? Math.round(value) : value.toFixed(precision)}
-            <span className="metric__unit">{unit}</span>
-          </>
-        ) : (
-          <span className="metric__idle">—</span>
-        )}
-      </div>
-    </div>
   );
 }

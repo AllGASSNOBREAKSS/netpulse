@@ -1,4 +1,5 @@
 import type { TestResult } from "./engine";
+import { computeScore, type ScorePart } from "./scoring";
 
 /** Turns raw metrics into a health score, activity grades, and a diagnosis. */
 
@@ -6,6 +7,7 @@ export type Grade = "Excellent" | "Good" | "Fair" | "Poor";
 
 export type Verdict = {
   score: number; // 0–100
+  breakdown: ScorePart[]; // per-component points, from src/lib/scoring.ts
   headline: string;
   activities: { name: string; grade: Grade; note: string }[];
   good: string[];
@@ -14,24 +16,10 @@ export type Verdict = {
   dontBuy?: string;
 };
 
-const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
-
-/** Log-ish curve: full points at `full`, half at ~full/5. */
-function curve(value: number, full: number, weight: number): number {
-  if (value <= 0) return 0;
-  return clamp(Math.log(1 + value) / Math.log(1 + full), 0, 1) * weight;
-}
-
 export function judge(r: TestResult): Verdict {
-  // ---- Score (100) ----
-  const sDown = curve(r.downloadMbps, 300, 28);
-  const sUp = curve(r.uploadMbps, 50, 20);
-  const sPing = clamp(1 - (r.idlePingMs - 8) / 92, 0, 1) * 14; // full <8ms, zero >100ms
-  const bloatPts = { A: 1, B: 0.8, C: 0.5, D: 0.2, F: 0 }[r.bufferbloatGrade] * 24;
-  const sJitter = clamp(1 - r.idleJitterMs / 30, 0, 1) * 8;
+  // ---- Score (100) — formula lives in src/lib/scoring.ts ----
+  const { total: score, parts: breakdown } = computeScore(r);
   const spikeRatio = r.probeCount > 0 ? r.spikes / r.probeCount : 0;
-  const sStable = clamp(1 - spikeRatio * 4, 0, 1) * 6;
-  const score = Math.round(sDown + sUp + sPing + bloatPts + sJitter + sStable);
 
   // ---- Headline ----
   let headline: string;
@@ -142,7 +130,7 @@ export function judge(r: TestResult): Verdict {
   if (actions.length === 0)
     actions.push("Nothing urgent. Save this result as your baseline and re-test when something feels slow — the comparison is the diagnosis.");
 
-  return { score, headline, activities, good, bad, actions, dontBuy };
+  return { score, breakdown, headline, activities, good, bad, actions, dontBuy };
 }
 
 function fmt(n: number): string {

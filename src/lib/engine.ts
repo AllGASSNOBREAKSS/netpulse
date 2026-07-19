@@ -27,6 +27,15 @@ export type TestConfig = {
   lowData: boolean;
 };
 
+/**
+ * Stream counts per mode. Exported so the UI labels phases with the stream
+ * count that actually ran — never a hard-coded guess.
+ */
+export const PROFILES = {
+  full: { dlStreams: 3, ulStreams: 2 },
+  lowData: { dlStreams: 1, ulStreams: 1 },
+} as const;
+
 export type TestResult = {
   timestamp: number;
   downloadMbps: number;
@@ -40,6 +49,7 @@ export type TestResult = {
   spikes: number;
   probeCount: number;
   dataUsedMB: number;
+  durationMs: number;
   lowData: boolean;
   samples: Sample[];
 };
@@ -112,7 +122,7 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
   /* ---- Phase 2: download -------------------------------------------------- */
   cb.onPhase?.("download");
   const dlDuration = cfg.lowData ? 5000 : 9000;
-  const dlStreams = cfg.lowData ? 1 : 3;
+  const dlStreams = (cfg.lowData ? PROFILES.lowData : PROFILES.full).dlStreams;
   const dlChunk = cfg.lowData ? 10_000_000 : 30_000_000;
   const dlCap = cfg.lowData ? 25_000_000 : Infinity;
 
@@ -164,7 +174,7 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
   /* ---- Phase 3: upload ---------------------------------------------------- */
   cb.onPhase?.("upload");
   const ulDuration = cfg.lowData ? 4000 : 7000;
-  const ulStreams = cfg.lowData ? 1 : 2;
+  const ulStreams = (cfg.lowData ? PROFILES.lowData : PROFILES.full).ulStreams;
   const ulChunkSize = cfg.lowData ? 1_000_000 : 2_000_000;
   const ulCap = cfg.lowData ? 8_000_000 : Infinity;
   const ulBody = new Uint8Array(ulChunkSize);
@@ -231,6 +241,7 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
     spikes,
     probeCount: allLoaded.length,
     dataUsedMB: (bytesDown + bytesUp) / 1_000_000,
+    durationMs: performance.now() - start,
     lowData: cfg.lowData,
     samples,
   };

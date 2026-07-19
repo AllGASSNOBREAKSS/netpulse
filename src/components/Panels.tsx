@@ -49,9 +49,9 @@ export function LatencyMonitor() {
         <div>
           <h1 className="panel__title">Latency monitor</h1>
           <p className="panel__sub">
-            Probes the network every 500&nbsp;ms and watches for spikes and drops. Leave it
-            running while you game or join a call — if something stutters, the strip below
-            catches it.
+            Sends a timed HTTPS probe to the nearest Cloudflare edge every 500&nbsp;ms and
+            watches for spikes and drops. Leave it running while you game or join a call — if
+            something stutters, the strip below catches it.
           </p>
         </div>
         <button className="runbtn runbtn--small" onClick={() => setRunning((r) => !r)}>
@@ -99,19 +99,34 @@ function Stat({ label, value, accent }: { label: string; value: string; accent?:
 }
 
 /* ============================================================================
-   Vulnerabilities / exposure — real data where the browser can get it,
-   honest "requires more" everywhere else. No fabricated findings.
+   Connection & Privacy — neutral facts about what the outside world sees.
+   These are properties of every internet connection, not vulnerabilities.
+   Public IP is masked by default; reveal is a deliberate user action.
    ============================================================================ */
 type TraceInfo = Record<string, string>;
 
-export function Vulnerabilities() {
+function maskIp(ip: string): string {
+  if (ip.includes(":")) {
+    // IPv6: keep the first two groups, mask the rest.
+    const groups = ip.split(":");
+    return `${groups[0]}:${groups[1]}:••••:••••`;
+  }
+  const parts = ip.split(".");
+  if (parts.length !== 4) return "•••";
+  return `${parts[0]}.${parts[1]}.•••.•••`;
+}
+
+export function ConnectionPrivacy() {
   const [trace, setTrace] = useState<TraceInfo | null>(null);
   const [failed, setFailed] = useState(false);
+  const [revealIp, setRevealIp] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     fetch("https://speed.cloudflare.com/cdn-cgi/trace")
       .then((r) => r.text())
       .then((t) => {
+        if (cancelled) return;
         const info: TraceInfo = {};
         for (const line of t.trim().split("\n")) {
           const [k, v] = line.split("=");
@@ -119,52 +134,67 @@ export function Vulnerabilities() {
         }
         setTrace(info);
       })
-      .catch(() => setFailed(true));
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  const ipDisplay = trace?.ip ? (revealIp ? trace.ip : maskIp(trace.ip)) : failed ? "unavailable" : "…";
 
   return (
     <div className="panel">
-      <h1 className="panel__title">Exposure & vulnerabilities</h1>
+      <h1 className="panel__title">Connection &amp; Privacy</h1>
       <p className="panel__sub">
-        What the outside world can see about your connection right now — measured live, not
-        guessed. Deeper checks are on the roadmap below.
+        What the outside world can see about your connection right now — read live from the
+        test server's echo of your request. These are normal properties of every internet
+        connection, <strong>not</strong> vulnerabilities.
       </p>
 
       <div className="stat-row">
-        <Stat label="public IP" value={trace?.ip ?? (failed ? "unavailable" : "…")} />
+        <div className="stat">
+          <div className="stat__label">public IP</div>
+          <div className="stat__value">{ipDisplay}</div>
+          {trace?.ip && (
+            <button className="stat__reveal" onClick={() => setRevealIp((v) => !v)}>
+              {revealIp ? "mask" : "reveal"}
+            </button>
+          )}
+        </div>
         <Stat label="nearest edge" value={trace?.colo ?? (failed ? "—" : "…")} />
         <Stat label="TLS" value={trace?.tls ?? (failed ? "—" : "…")} />
         <Stat label="HTTP" value={trace?.http ?? (failed ? "—" : "…")} />
-        <Stat label="WARP/VPN (CF)" value={trace ? (trace.warp === "on" ? "on" : "off") : failed ? "—" : "…"} />
+        <Stat label="Cloudflare WARP" value={trace ? (trace.warp === "on" ? "on" : "off") : failed ? "—" : "…"} />
       </div>
 
       <p className="panel__note">
-        Your public IP is visible to every site you visit — that's normal. What matters is
-        what's behind it: router firmware, open ports, and leaked credentials.
+        Every site you visit sees your public IP — that's how the internet routes replies.
+        NetPulse masks it by default so a screenshot or screen-share doesn't leak it; nothing
+        on this page is sent anywhere or stored.
       </p>
 
-      <h2 className="panel__h2">Coming next</h2>
+      <h2 className="panel__h2">Planned checks (not yet available)</h2>
       <div className="soon-grid">
-        <Soon title="Password breach check" what="Check whether your email or passwords appear in known data breaches — hashed lookups, nothing stored." />
+        <Soon title="Password breach check" what="Check whether your email appears in known data breaches — hashed lookups, nothing stored." />
         <Soon title="Router health" what="Detect router model + firmware age and flag known CVEs. Needs the companion app — browsers can't reach your router." />
         <Soon title="DNS security" what="Test whether your DNS is encrypted (DoH/DoT) and who actually answers your lookups." />
-        <Soon title="ISP outage radar" what="See whether your provider (Optimum, Verizon, Xfinity…) has reported problems in your area right now." />
+        <Soon title="ISP outage radar" what="See whether your provider has reported problems in your area right now." />
       </div>
     </div>
   );
 }
 
 /* ============================================================================
-   Connections — honest: a browser cannot enumerate LAN devices. Explain,
+   Devices — honest: a browser cannot enumerate LAN devices. Explain,
    and show the plan.
    ============================================================================ */
-export function Connections() {
+export function Devices() {
   return (
     <div className="panel">
-      <h1 className="panel__title">Connections</h1>
-      <p className="panel__sub">
-        Who's on your Wi-Fi, and how much of it they're using.
-      </p>
+      <h1 className="panel__title">Devices</h1>
+      <p className="panel__sub">Who's on your Wi-Fi, and how much of it they're using.</p>
 
       <div className="honest">
         <strong>Straight answer:</strong> a web page is sandboxed — it cannot scan your network,
@@ -174,7 +204,7 @@ export function Connections() {
         fiction.
       </div>
 
-      <h2 className="panel__h2">What this page will do</h2>
+      <h2 className="panel__h2">What this page will do (planned)</h2>
       <div className="soon-grid">
         <Soon title="Device list" what="Every device on your network — phones, TVs, consoles, unknown guests — with names and vendors." />
         <Soon title="Intruder alert" what="A device you've never seen joins your Wi-Fi → you get a notification." />
