@@ -91,12 +91,9 @@ export const SCORE_RULES: ScoreRule[] = [
     id: "stability",
     label: "Stability",
     weight: 6,
-    rule: "Zero points if ≥25% of loaded-latency probes spike",
-    input: (r) => `${r.spikes} spike${r.spikes === 1 ? "" : "s"} in ${r.probeCount} probes`,
-    quality: (r) => {
-      const ratio = r.probeCount > 0 ? r.spikes / r.probeCount : 0;
-      return clamp(1 - ratio * 4, 0, 1);
-    },
+    rule: "Uses the displayed stability score (loaded-latency spread, spikes, and throughput variation)",
+    input: (r) => `${r.stability.score}/100 · ${r.spikes} spike${r.spikes === 1 ? "" : "s"}`,
+    quality: (r) => clamp(r.stability.score / 100, 0, 1),
   },
 ];
 

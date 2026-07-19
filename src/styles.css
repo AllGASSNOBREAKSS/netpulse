@@ -354,18 +354,19 @@ html, body {
 .metric__idle { color: var(--line); }
 .metric__na { color: var(--muted); font-size: 16px; }
 .metric__sub { margin-top: 2px; font-size: 11px; color: var(--muted); min-height: 17px; }
-.metric__exp {
+.metric__source {
   margin-left: 6px;
   font-family: var(--mono);
   font-size: 8px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--amber);
-  border: 1px solid rgba(255, 180, 84, 0.4);
   border-radius: 5px;
   padding: 1px 4px;
   vertical-align: middle;
 }
+.metric__source--measured { color: var(--green); border: 1px solid rgba(74, 222, 128, 0.35); }
+.metric__source--calculated { color: var(--blue); border: 1px solid rgba(96, 165, 250, 0.35); }
+.metric__source--experimental { color: var(--amber); border: 1px solid rgba(255, 180, 84, 0.4); }
 
 /* ---- Preflight + server summary ---- */
 .pf {
@@ -423,6 +424,7 @@ html, body {
   border-top: 1px solid var(--line);
   padding-top: 20px;
 }
+.report__actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
 .conf {
   flex: 1 1 320px;
   border: 1px solid var(--line);
@@ -465,6 +467,7 @@ html, body {
 }
 .conf__reasons li[data-ok="true"] .conf__dot { background: rgba(74, 222, 128, 0.15); color: var(--green); }
 .conf__reasons li[data-ok="false"] .conf__dot { background: rgba(255, 180, 84, 0.15); color: var(--amber); }
+.conf__penalty { color: var(--amber); font-family: var(--mono); font-size: 10px; white-space: nowrap; }
 
 .method-btn {
   font-family: var(--mono);
@@ -673,6 +676,7 @@ html, body {
   margin: 28px 0 12px;
 }
 .panel__note { margin-top: 16px; font-size: 13px; color: var(--muted); max-width: 60ch; }
+.identity-lookup { margin-top: 28px; padding-top: 22px; border-top: 1px solid var(--line); }
 
 .stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 22px; }
 .stat { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 12px 14px; min-width: 0; }
@@ -759,6 +763,10 @@ html, body {
   border-top: 1px solid var(--line);
   padding-top: 16px;
   max-width: 70ch;
+}
+
+.foot__legal {
+  margin-top: 12px;
 }
 
 /* ================= Responsive ================= */

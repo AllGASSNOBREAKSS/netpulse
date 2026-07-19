@@ -1,10 +1,10 @@
 /**
- * Download and upload throughput with warm-up, cache-busting, no-store,
- * adaptive payloads, single- and multi-connection runs, rolling sampling,
- * duration/data caps, early stopping on confidence, and raw sample storage.
+ * Download and upload throughput with cache-busting, no-store, single- and
+ * multi-connection runs, measured payload accounting, rolling progress,
+ * duration/data caps, early stopping, and raw sample storage.
  */
 import { getServer } from "./servers";
-import { coefficientOfVariation, max, topHalfMedian } from "./stats";
+import { coefficientOfVariation, max } from "./stats";
 import { pingOnce } from "./latency";
 import type { ThroughputStats } from "./types";
 
@@ -42,7 +42,12 @@ function waitForProbeCadence(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-/** Shared rolling-sample loop used by both download and upload. */
+/**
+ * Shared load runner. The authoritative result is transferred application
+ * payload divided by the phase's actual elapsed time. Download progress can be
+ * sampled from streamed chunks; browsers do not expose upload progress, so
+ * upload progress is the cumulative accepted payload rate after each POST.
+ */
 async function runLoad(
   opts: LoadOpts,
   direction: "download" | "upload",
@@ -68,19 +73,30 @@ async function runLoad(
   // Use the actual elapsed time rather than assuming the interval fired on
   // schedule. Background tabs and busy main threads can delay timers, and a
   // fixed 250 ms denominator would overstate throughput in those cases.
-  const flushSample = (now = performance.now()) => {
-    const elapsedMs = now - windowStartedAt;
-    const bytes = windowBytes;
-    windowBytes = 0;
-    windowStartedAt = now;
-    if (bytes <= 0 || elapsedMs <= 0) return;
-    const mbps = (bytes * 8) / elapsedMs / 1000;
+  const recordSample = (mbps: number) => {
+    if (!Number.isFinite(mbps) || mbps < 0) return;
     samples.push(mbps);
     opts.onThroughput?.(mbps);
   };
 
+  const flushDownloadSample = (now = performance.now(), final = false) => {
+    const elapsedMs = now - windowStartedAt;
+    const bytes = windowBytes;
+    windowBytes = 0;
+    windowStartedAt = now;
+    if (elapsedMs <= 0) return;
+    // A very short tail reflects event-loop delivery more than network rate.
+    // It remains included in the authoritative phase average, but not as a
+    // misleading instantaneous peak.
+    if (final && elapsedMs < SAMPLE_MS / 2 && samples.length > 0) return;
+    if (bytes === 0 && totalBytes === 0) return;
+    const sampleBytes = final && samples.length === 0 ? totalBytes : bytes;
+    const sampleElapsed = final && samples.length === 0 ? now - start : elapsedMs;
+    recordSample((sampleBytes * 8) / sampleElapsed / 1000);
+  };
+
   const sampler = setInterval(() => {
-    flushSample();
+    if (direction === "download") flushDownloadSample();
     const elapsed = performance.now() - start;
     // Early stop: enough steady samples past the minimum duration.
     if (elapsed > opts.minDurationMs && samples.length >= EARLY_STOP_MIN_SAMPLES) {
@@ -91,6 +107,24 @@ async function runLoad(
       }
     }
   }, SAMPLE_MS);
+
+  const recordBytes = (n: number) => {
+    totalBytes += n;
+    opts.onBytes?.(totalBytes);
+    if (direction === "download") {
+      windowBytes += n;
+      return;
+    }
+    const elapsedMs = performance.now() - start;
+    if (elapsedMs > 0) recordSample((totalBytes * 8) / elapsedMs / 1000);
+  };
+
+  const stopper = setTimeout(() => ctrl.abort(), opts.maxDurationMs);
+  // Start the traffic first. This guarantees that every latency probe below
+  // begins while at least one load request is already in flight.
+  const load = worker(ctrl.signal, recordBytes, cap, () => {
+    failedRequests++;
+  });
 
   let probing = true;
   const prober = (async () => {
@@ -107,19 +141,7 @@ async function runLoad(
     }
   })();
 
-  const stopper = setTimeout(() => ctrl.abort(), opts.maxDurationMs);
-  await worker(
-    ctrl.signal,
-    (n) => {
-      windowBytes += n;
-      totalBytes += n;
-      opts.onBytes?.(totalBytes);
-    },
-    cap,
-    () => {
-      failedRequests++;
-    },
-  );
+  await load;
   const loadEndedAt = performance.now();
   clearTimeout(stopper);
   ctrl.abort();
@@ -127,23 +149,30 @@ async function runLoad(
   // Fast or byte-capped phases may complete before the first 250 ms tick. The
   // final partial window is still a real timed measurement and must not be
   // discarded, otherwise a fast connection can incorrectly report 0 Mbps.
-  flushSample(loadEndedAt);
+  if (direction === "download") flushDownloadSample(loadEndedAt, true);
   probing = false;
   await prober;
 
-  if (totalBytes === 0 || samples.length === 0) {
+  if (totalBytes === 0) {
     throw new Error(
       `${direction === "download" ? "Download" : "Upload"} measurement failed: the test endpoint transferred no usable data.`,
     );
   }
 
+  const durationMs = loadEndedAt - start;
+  const mbps = (totalBytes * 8) / durationMs / 1000;
+  // Emit the final authoritative result as the last live sample. For uploads,
+  // this is also the only defensible peak because fetch exposes no byte-level
+  // upload progress.
+  opts.onThroughput?.(mbps);
+
   return {
-    mbps: topHalfMedian(samples),
-    peakMbps: max(samples),
+    mbps,
+    peakMbps: direction === "download" ? Math.max(mbps, max(samples)) : mbps,
     samples,
     cov: coefficientOfVariation(samples.slice(Math.floor(samples.length / 2))),
     bytes: totalBytes,
-    durationMs: loadEndedAt - start,
+    durationMs,
     earlyStopped,
     failedRequests,
     rtts,

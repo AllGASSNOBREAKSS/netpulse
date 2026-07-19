@@ -52,13 +52,13 @@ A staged pipeline — full detail in **[ENGINE.md](ENGINE.md)**:
 | Preflight | Browser, OS, device, tab state, IPv4/IPv6 availability, secure context, **possible** VPN/proxy (heuristic), estimated duration + data |
 | Server selection | Probes candidates, ranks by median latency + jitter + availability, explains the pick |
 | Idle latency | Timed zero-byte probes (`performance.now()`) → min / median / mean / **P95 / P99** / jitter |
-| Download | **Single- then multi-connection**, cache-busted, no-store, timed windows (including the final partial window), early-stop on steadiness, duration/data caps; top-half median |
-| Upload | Parallel POST of in-memory random payloads; reliable + **peak** throughput |
+| Download | **Single- then multi-connection**, cache-busted, no-store; received payload ÷ actual phase time, with timed windows for variation |
+| Upload | Parallel POST of non-compressible in-memory payloads; server-accepted payload ÷ actual phase time |
 | Loaded latency | Probed *while saturating* download, then upload — kept **separate** |
 | Bufferbloat | Loaded − idle rise, **separate download/upload grades A–F** |
 | Stability | 0–100 from latency stddev + spikes + throughput variation; P95/P99; longest spike |
-| Packet loss | **Experimental** WebRTC/STUN UDP-reachability check — *not* an end-to-end loss % |
-| Confidence | 0–100 trust score from sample volume, variation, server stability, tab visibility, completion |
+| UDP reachability | **Experimental** WebRTC/STUN check — *not* an end-to-end packet-loss percentage |
+| Confidence | 0–100 trust score with every deduction shown: sampling, variation, server stability, tab visibility, completion, errors |
 
 From the results it derives a **transparent 0–100 health score** (formula in one
 file, [`src/lib/scoring.ts`](src/lib/scoring.ts)), eight **real-world activity
@@ -71,8 +71,8 @@ inspectable and exportable as JSON.
 
 ## Features
 
-- 📡 Real measurement engine — every displayed metric is measured or derived
-  from measurements; anything that can't be measured says so (see packet loss)
+- 📡 Real measurement engine — every card is visibly labeled **measured**,
+  **calculated**, or **experimental**; unsupported metrics are never invented
 - 🏎️ Animated automotive speedometer — spring-physics needle, auto-scaling dial
   (240 → 500 → 1000+ Mbps), redline zone, phase "gear" indicator showing the
   stream count that actually ran, measured-payload fuel bar
@@ -86,13 +86,13 @@ inspectable and exportable as JSON.
   Privacy · History
 - 📉 Live latency monitor — continuous 500 ms probes with spike/drop detection,
   run it while you game or join calls
-- 🔒 Connection & Privacy panel — public IP (masked by default, reveal on
-  demand), nearest edge, TLS/HTTP version, WARP detection — presented as
-  neutral connection facts, not scare-words
+- 🔒 Connection & Privacy panel — public IP (masked by default), nearest edge,
+  TLS/HTTP version, and WARP detection; ISP/ASN/approximate area is a separate,
+  privacy-disclosed opt-in lookup and is never inferred from the edge code
 - 🛰️ Preflight + server selection panel — environment facts and *why* this
   server was chosen, shown before the numbers
-- 🎯 Result confidence score with a reason breakdown (sample volume, tab
-  visibility, server stability, completion…) so you know how much to trust a run
+- 🎯 Result confidence score with exact per-factor deductions so you know how
+  much to trust a run
 - 📤 Methodology & raw-data panel — server candidates, per-run limitations, the
   full method, and one-click JSON export (raw samples included, public IP never)
 - 🩺 Activity grades and a written diagnosis with a "don't waste money on" callout
@@ -103,10 +103,13 @@ inspectable and exportable as JSON.
 
 ## Honest limitations
 
-- **Packet loss is experimental.** True end-to-end loss needs a UDP echo server
-  NetPulse doesn't run. Instead the packet-loss card runs a real WebRTC/STUN
-  UDP-reachability check, labels it experimental, and points to an OS-level
-  `ping` for a true loss figure — it never invents a loss percentage.
+- **Packet loss is unavailable.** True end-to-end loss needs a UDP echo server
+  NetPulse doesn't run. The experimental **UDP reachability** card performs a
+  real WebRTC/STUN connectivity check and points to an OS-level `ping`; it never
+  invents a loss percentage.
+- Browser fetch exposes received download chunks, but not byte-level upload
+  progress. Upload is therefore accepted application payload divided by the
+  full phase time; aborted partial uploads and protocol overhead are excluded.
 - The browser can't read Wi-Fi radio details (SSID, band, signal strength) —
   that would need a native companion app. NetPulse tests the *connection*, not
   the radio.
@@ -162,4 +165,7 @@ The engine is modular under `src/lib/` — `preflight`, `servers`, `latency`,
 
 ## License
 
-[MIT](LICENSE) © bbarc0de
+NetPulse is licensed under the [GNU Affero General Public License v3.0 only](LICENSE)
+(`AGPL-3.0-only`).
+
+© 2026 NetPulse and contributors.

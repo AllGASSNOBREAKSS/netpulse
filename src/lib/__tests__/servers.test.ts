@@ -14,10 +14,8 @@ function probe(
   return {
     id,
     provider: id,
-    city: null,
-    region: null,
-    approxDistanceKm: null,
-    asn: null,
+    edgeCode: null,
+    clientCountryCode: null,
     protocol: "HTTPS",
     ipFamily,
     latency: summarize(rtts),

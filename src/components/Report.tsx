@@ -49,9 +49,8 @@ export function PreflightServer({
           <div className="pf__h">Server {server.manual && <span className="pf__manual">manual</span>}</div>
           <div className="pf__chips">
             <Chip k="Provider" v={server.chosen.provider} />
-            {server.chosen.city && <Chip k="Edge" v={server.chosen.city} />}
-            {server.chosen.region && <Chip k="Region" v={server.chosen.region} />}
-            {server.chosen.approxDistanceKm != null && <Chip k="Distance" v={`~${server.chosen.approxDistanceKm} km`} />}
+            {server.chosen.edgeCode && <Chip k="Edge code" v={server.chosen.edgeCode} />}
+            {server.chosen.clientCountryCode && <Chip k="Client country" v={server.chosen.clientCountryCode} />}
             <Chip k="Protocol" v={server.chosen.protocol} />
             <Chip k="IP" v={server.chosen.ipFamily} />
             <Chip k="Latency" v={`${Math.round(server.chosen.latency.median)} ms`} />
@@ -95,6 +94,7 @@ export function ConfidencePanel({ confidence }: { confidence: Confidence }) {
               <span className="conf__dot">{r.ok ? "✓" : "!"}</span>
               <span>
                 <strong>{r.label}:</strong> {r.detail}
+                {r.penalty > 0 && <span className="conf__penalty"> −{r.penalty} points</span>}
               </span>
             </li>
           ))}
@@ -131,7 +131,7 @@ export function MethodologyModal({
         <h3 className="mi__h">Test configuration</h3>
         <table className="mi__bands">
           <tbody>
-            <tr><td className="mi__range">Server</td><td>{result.server.chosen.provider} · {result.server.chosen.city ?? "?"} · {result.server.chosen.protocol}</td></tr>
+            <tr><td className="mi__range">Server</td><td>{result.server.chosen.provider} · edge {result.server.chosen.edgeCode ?? "unknown"} · {result.server.chosen.protocol}</td></tr>
             <tr><td className="mi__range">Mode</td><td>{result.lowData ? "Low-data" : "Full"}</td></tr>
             <tr><td className="mi__range">IP family</td><td>{result.ispLocation.ipFamily} · {result.ispLocation.ipMasked}</td></tr>
             <tr><td className="mi__range">Payload measured</td><td>{result.dataUsedMB.toFixed(0)} MB in {(result.durationMs / 1000).toFixed(1)} s</td></tr>

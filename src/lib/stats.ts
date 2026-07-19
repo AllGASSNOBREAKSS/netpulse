@@ -64,18 +64,6 @@ export function coefficientOfVariation(xs: number[]): number {
   return stddev(xs) / m;
 }
 
-/**
- * Representative throughput: median of the top half of samples. This ignores
- * TCP slow-start ramp-up without cherry-picking the single peak, matching how
- * mainstream speed tests report a "result" rather than a raw average.
- */
-export function topHalfMedian(xs: number[]): number {
-  if (xs.length === 0) return 0;
-  const s = [...xs].sort((a, b) => a - b);
-  const top = s.slice(Math.floor(s.length / 2));
-  return median(top);
-}
-
 export type Summary = {
   min: number;
   median: number;

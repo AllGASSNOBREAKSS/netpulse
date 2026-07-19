@@ -56,10 +56,10 @@ export type Preflight = {
 export type ServerProbe = {
   id: string;
   provider: string;
-  city: string | null;
-  region: string | null;
-  approxDistanceKm: number | null;
-  asn: string | null;
+  /** Cloudflare three-letter serving data-center code, not a client city. */
+  edgeCode: string | null;
+  /** Country code reported for the client by the measurement provider. */
+  clientCountryCode: string | null;
   protocol: string; // e.g. "HTTPS (fetch)"
   ipFamily: "IPv4" | "IPv6" | "unknown";
   latency: Summary;
@@ -81,7 +81,7 @@ export type ServerSelection = {
 
 /* ---- Throughput ----------------------------------------------------------- */
 export type ThroughputStats = {
-  /** Reliable representative figure (median of top-half of samples). */
+  /** Application payload bits divided by the phase's actual elapsed time. */
   mbps: number;
   peakMbps: number;
   samples: number[]; // raw per-window Mbps samples
@@ -113,7 +113,7 @@ export type Stability = {
   p99Ms: number;
   spikes: number;
   longestSpikeMs: number;
-  throughputCov: number; // download throughput variation
+  throughputCov: number; // worse of download/upload throughput variation
 };
 
 /* ---- Packet loss (experimental) ------------------------------------------- */
@@ -141,7 +141,7 @@ export type IspLocation = {
 };
 
 /* ---- Confidence ----------------------------------------------------------- */
-export type ConfidenceReason = { label: string; ok: boolean; detail: string };
+export type ConfidenceReason = { label: string; ok: boolean; detail: string; penalty: number };
 export type Confidence = {
   score: number; // 0–100
   reasons: ConfidenceReason[];
@@ -200,6 +200,8 @@ export type TestResult = {
 export type EngineCallbacks = {
   onPhase?: (phase: Phase) => void;
   onSample?: (s: Sample) => void;
+  /** Cumulative application payload accepted or received during this run. */
+  onBytes?: (totalBytes: number) => void;
   onPartial?: (partial: Partial<TestResult>) => void;
   onPreflight?: (p: Preflight) => void;
   onServer?: (s: ServerSelection) => void;

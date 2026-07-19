@@ -43,21 +43,29 @@ export function getServer(id: string | undefined): ServerCandidate {
 }
 
 async function pingServer(c: ServerCandidate): Promise<number | null> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 5000);
   const t0 = performance.now();
   try {
-    const res = await fetch(c.downPath(0), { cache: "no-store" });
+    const res = await fetch(c.downPath(0), { cache: "no-store", signal: ctrl.signal });
     if (!res.ok) return null;
     return performance.now() - t0;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
 type TraceInfo = Record<string, string>;
 
 async function fetchTrace(c: ServerCandidate): Promise<TraceInfo | null> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 5000);
   try {
-    const t = await (await fetch(c.tracePath, { cache: "no-store" })).text();
+    const response = await fetch(c.tracePath, { cache: "no-store", signal: ctrl.signal });
+    if (!response.ok) return null;
+    const t = await response.text();
     const info: TraceInfo = {};
     for (const line of t.trim().split("\n")) {
       const [k, v] = line.split("=");
@@ -66,6 +74,8 @@ async function fetchTrace(c: ServerCandidate): Promise<TraceInfo | null> {
     return info;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -88,18 +98,11 @@ async function probeCandidate(c: ServerCandidate, samples: number): Promise<Serv
   const ip = trace?.ip ?? "";
   const ipFamily: ServerProbe["ipFamily"] = ip.includes(":") ? "IPv6" : ip ? "IPv4" : "unknown";
 
-  // Cloudflare exposes the serving colo code and the client's country code,
-  // but not client coordinates. A meaningful client-to-edge distance cannot
-  // be derived from those facts alone, so it remains unavailable.
-  const approxDistanceKm = null;
-
   return {
     id: c.id,
     provider: c.provider,
-    city: trace?.colo ?? null,
-    region: trace?.loc ?? null,
-    approxDistanceKm,
-    asn: null,
+    edgeCode: trace?.colo ?? null,
+    clientCountryCode: trace?.loc ?? null,
     protocol: c.protocol,
     ipFamily,
     latency,
@@ -150,7 +153,7 @@ export async function selectServer(
     chosen = available[0] ?? probes[0];
     reason =
       available.length <= 1
-        ? `${chosen.provider} (only reachable candidate). Anycast routed you to colo ${chosen.city ?? "?"} at ${Math.round(chosen.latency.median)} ms median latency.`
+        ? `${chosen.provider} (only reachable candidate). Anycast routed you to edge ${chosen.edgeCode ?? "unknown"} at ${Math.round(chosen.latency.median)} ms median HTTPS latency.`
         : `Lowest latency (${Math.round(chosen.latency.median)} ms median) and steadiest of ${available.length} reachable candidates.`;
   }
 

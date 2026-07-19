@@ -16,6 +16,7 @@ export type MetricSamples = { values: number[]; unit: string; caption: string };
 export type MetricDef = {
   id: string;
   name: string;
+  provenance: "measured" | "calculated" | "experimental";
   /** Set when the metric cannot be measured from a browser; explains why. */
   unavailable?: string;
   /** "experimental" adds an honest badge without claiming a hard number. */
@@ -46,12 +47,13 @@ export const METRICS: MetricDef[] = [
   {
     id: "download",
     name: "Download speed",
+    provenance: "measured",
     hotPhase: "download",
     value: (r) => (r.downloadMbps !== undefined ? `${fmt(r.downloadMbps)} Mbps` : null),
     sub: (r) =>
       r.download ? `single ${fmt(r.download.single.mbps)} · multi ${fmt(r.download.multi.mbps)} Mbps` : null,
     what: "How much data your connection can pull down per second — the headline number ISPs advertise.",
-    how: "Two runs against the selected server: a single-connection run, then a multi-connection run (up to 4 parallel HTTPS streams; 2 in low-data mode). Each request is cache-busted and no-store. Throughput uses timed ~250 ms windows plus the final partial window; the reported figure is the median of the top half of the multi-connection samples, which ignores TCP slow-start. Runs stop early once samples are steady, or at the duration/data cap.",
+    how: "Two runs against the selected server: a single-connection run, then a multi-connection run (up to 4 parallel HTTPS streams; 2 in low-data mode). Each request is cache-busted and no-store. The reported rate is the application payload received divided by the phase's actual elapsed time. Timed download windows show variation but do not replace that byte/time result. Runs stop early once samples are steady, or at the duration/data cap.",
     why: "Determines how fast pages, downloads, streams and updates arrive. The gap between single and multi connection speed hints at whether a single flow is being shaped. Past ~100 Mbps, responsiveness (latency) matters more than raw speed.",
     bands: [
       { range: "≥ 300 Mbps", label: "More than almost any household needs" },
@@ -74,11 +76,12 @@ export const METRICS: MetricDef[] = [
   {
     id: "upload",
     name: "Upload speed",
+    provenance: "measured",
     hotPhase: "upload",
     value: (r) => (r.uploadMbps !== undefined ? `${fmt(r.uploadMbps)} Mbps` : null),
-    sub: (r) => (r.upload ? `peak ${fmt(r.upload.peakMbps)} Mbps` : null),
+    sub: (r) => (r.upload ? `${r.upload.samples.length} accepted-payload observations` : null),
     what: "How much data your connection can push out per second.",
-    how: "Parallel HTTPS POST streams (3, or 1 in low-data mode) send in-memory random payloads to the server for up to 8 seconds. Throughput uses timed ~250 ms windows plus the final partial window; the reported figure is the median of the top half of samples, and peak is the single best window.",
+    how: "Parallel HTTPS POST streams (3, or 1 in low-data mode) send non-compressible in-memory payloads for up to 8 seconds. The reported rate is payload accepted by the server divided by the phase's actual elapsed time. Fetch does not expose byte-level upload progress, so live observations update only when a POST is accepted and no unsupported upload peak is claimed.",
     why: "Video calls, livestreaming, cloud backups and sending files all depend on upload. Many cable plans are heavily asymmetric — a fraction of the download figure.",
     bands: [
       { range: "≥ 50 Mbps", label: "Excellent — streaming and backups without thinking" },
@@ -98,6 +101,7 @@ export const METRICS: MetricDef[] = [
   {
     id: "idleLatency",
     name: "Idle latency",
+    provenance: "measured",
     hotPhase: "latency",
     value: (r) => (r.idlePingMs !== undefined ? `${Math.round(r.idlePingMs)} ms` : null),
     sub: (r) => (r.idleLatency ? `p95 ${Math.round(r.idleLatency.p95)} · min ${Math.round(r.idleLatency.min)} ms` : null),
@@ -122,6 +126,7 @@ export const METRICS: MetricDef[] = [
   {
     id: "dlLoaded",
     name: "Download-loaded latency",
+    provenance: "measured",
     hotPhase: "download",
     value: (r) => (r.loadedDownPingMs !== undefined ? `${Math.round(r.loadedDownPingMs)} ms` : null),
     sub: (r) =>
@@ -149,6 +154,7 @@ export const METRICS: MetricDef[] = [
   {
     id: "ulLoaded",
     name: "Upload-loaded latency",
+    provenance: "measured",
     hotPhase: "upload",
     value: (r) => (r.loadedUpPingMs !== undefined ? `${Math.round(r.loadedUpPingMs)} ms` : null),
     sub: (r) =>
@@ -176,6 +182,7 @@ export const METRICS: MetricDef[] = [
   {
     id: "jitter",
     name: "Jitter",
+    provenance: "calculated",
     hotPhase: "latency",
     value: (r) => (r.idleJitterMs !== undefined ? `${r.idleJitterMs.toFixed(1)} ms` : null),
     what: "How much your latency wobbles between consecutive probes — consistency, not speed.",
@@ -198,7 +205,8 @@ export const METRICS: MetricDef[] = [
   },
   {
     id: "packetLoss",
-    name: "Packet loss",
+    name: "UDP reachability",
+    provenance: "experimental",
     experimental: true,
     value: (r) => {
       if (!r.packetLoss) return null;
@@ -209,7 +217,7 @@ export const METRICS: MetricDef[] = [
           : "unknown";
     },
     sub: (r) => (r.packetLoss?.stunRttMs != null ? `STUN ${r.packetLoss.stunRttMs} ms` : "experimental probe"),
-    what: "The percentage of packets that never arrive. True loss can't be measured from a web page, so this card shows a related, honest signal instead: whether UDP can leave your network (a WebRTC/STUN reachability check).",
+    what: "Whether UDP can leave your network and reach a public STUN server. This is related to real-time app connectivity, but it is not a packet-loss measurement.",
     how: "A WebRTC RTCPeerConnection gathers ICE candidates against public STUN servers. A server-reflexive (srflx) candidate means UDP egress works and reaches a STUN server, and we time how long that took. This is NOT an end-to-end loss percentage — that would need a cooperating UDP echo server, which NetPulse doesn't run yet.",
     why: "Even 1–2% real loss makes calls robotic and games rubber-band. UDP reachability is a useful proxy: if UDP is blocked, real-time apps fall back to slower TCP relays. We label this experimental rather than inventing a loss number.",
     bands: [
@@ -223,6 +231,7 @@ export const METRICS: MetricDef[] = [
   {
     id: "bufferbloat",
     name: "Bufferbloat",
+    provenance: "calculated",
     value: (r) =>
       r.bufferbloatGrade !== undefined && r.bufferbloatMs !== undefined
         ? `${r.bufferbloatGrade} (+${Math.round(r.bufferbloatMs)} ms)`
@@ -251,13 +260,14 @@ export const METRICS: MetricDef[] = [
   {
     id: "stability",
     name: "Stability",
+    provenance: "calculated",
     value: (r) => (r.stability ? `${r.stability.score}/100` : null),
     sub: (r) =>
       r.stability
         ? `${r.stability.spikes} spike${r.stability.spikes === 1 ? "" : "s"} · σ ${r.stability.latencyStddevMs} ms`
         : null,
     what: "A 0–100 score for how steady latency stayed during load — averages hide brief dropouts, this doesn't.",
-    how: "Combines the standard deviation of all loaded-latency probes, the spike count (probes above 3× idle or idle+150 ms), and the download throughput variation into one score. Also reports p95/p99 latency and the longest spike.",
+    how: "Combines the standard deviation of all loaded-latency probes, the spike count (probes above 3× idle or idle+150 ms), and the worse of download/upload throughput variation into one score. Also reports p95/p99 latency and the longest spike.",
     why: "A connection that spikes for two seconds every minute ruins calls and games while still posting good headline numbers.",
     bands: [
       { range: "85–100", label: "Steady throughout" },
@@ -276,6 +286,7 @@ export const METRICS: MetricDef[] = [
   {
     id: "duration",
     name: "Test duration",
+    provenance: "measured",
     value: (r) => (r.durationMs !== undefined ? `${(r.durationMs / 1000).toFixed(1)} s` : null),
     what: "How long the whole test took, wall-clock, from preflight to final result.",
     how: "Measured directly: performance.now() at test start vs. completion.",
@@ -292,6 +303,7 @@ export const METRICS: MetricDef[] = [
   {
     id: "dataUsed",
     name: "Data transferred",
+    provenance: "measured",
     value: (r) => (r.dataUsedMB !== undefined ? `${r.dataUsedMB.toFixed(0)} MB` : null),
     what: "The application payload NetPulse observed during this test.",
     how: "Counted byte-by-byte from download stream readers and from upload bodies after the server accepted each request. Browser APIs do not expose protocol overhead or the portion of an upload aborted mid-request, so this is measured payload, not exact on-wire usage.",

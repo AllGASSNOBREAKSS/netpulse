@@ -11,10 +11,10 @@ import type { Verdict } from "./verdict";
 export const METHODOLOGY = [
   "NetPulse measures against the Cloudflare speed endpoint (speed.cloudflare.com), an anycast service that routes you to the nearest of Cloudflare's edge locations. Results reflect the path to that edge and will differ from Ookla, Fast.com, Cloudflare's own test, or M-Lab, which use different servers, server counts, and aggregation methods. We do not tune NetPulse to match any of them.",
   "Latency is measured with zero-byte HTTPS requests timed by performance.now() (monotonic, sub-millisecond). HTTP round-trips read slightly higher than raw ICMP ping.",
-  "Throughput uses cache-busted, no-store requests and actual elapsed time for each ~250 ms window plus the final partial window. Download is run single-connection then multi-connection; the reported figure is the median of the top half of the multi-connection samples, which discards TCP slow-start. Phases stop early once samples are steady, or at a duration/payload cap.",
+  "Throughput uses cache-busted, no-store requests. Download runs single-connection then multi-connection. Each reported result is measured application payload divided by the phase's actual elapsed time; download windows and accepted-upload observations show variation. Phases stop early once samples are steady, or at a duration/payload cap.",
   "Loaded latency is probed continuously during download and upload; bufferbloat is the increase over idle, graded separately per direction.",
-  "Packet loss is experimental: a WebRTC/STUN check reports UDP reachability, not an end-to-end loss percentage.",
-  "IP-based location is approximate and reflects network routing (often an ISP point of presence), not your street address. The full public IP is masked and never exported.",
+  "Packet loss is unavailable: the experimental WebRTC/STUN card reports UDP reachability, not an end-to-end loss percentage.",
+  "The automatic Cloudflare trace supplies only a country code, serving edge code, IP family, and masked IP. ISP, ASN, city, and region are not inferred. The optional metadata lookup is user-initiated and is not part of test exports.",
 ];
 
 export function buildExport(result: TestResult, verdict: Verdict | null) {

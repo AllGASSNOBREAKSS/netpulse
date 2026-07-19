@@ -50,4 +50,12 @@ describe("stability score", () => {
     expect(s.longestSpikeMs).toBeGreaterThanOrEqual(500);
     expect(s.score).toBeLessThan(60);
   });
+
+  it("uses the less stable throughput direction", () => {
+    const loaded = Array.from({ length: 20 }, () => 25);
+    const stableBoth = computeStability(20, loaded, 0.02, 0.03);
+    const unstableUpload = computeStability(20, loaded, 0.02, 0.4);
+    expect(unstableUpload.throughputCov).toBe(0.4);
+    expect(unstableUpload.score).toBeLessThan(stableBoth.score);
+  });
 });

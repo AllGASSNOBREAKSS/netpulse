@@ -44,6 +44,7 @@ export function computeStability(
   idleMedian: number,
   loadedRtts: number[],
   downloadCov: number,
+  uploadCov = 0,
 ): Stability {
   const sd = stddev(loadedRtts);
   const p95 = percentile(loadedRtts, 95);
@@ -57,7 +58,8 @@ export function computeStability(
   const spreadPenalty = Math.min(sd / 100, 1); // 100ms stddev = full penalty
   const spikeRatio = loadedRtts.length ? spikes / loadedRtts.length : 0;
   const spikePenalty = Math.min(spikeRatio * 4, 1);
-  const covPenalty = Math.min(downloadCov / 0.4, 1); // CoV 0.4 = full penalty
+  const throughputCov = Math.max(downloadCov, uploadCov);
+  const covPenalty = Math.min(throughputCov / 0.4, 1); // CoV 0.4 = full penalty
 
   const score = Math.round(100 * (1 - (spreadPenalty * 0.4 + spikePenalty * 0.4 + covPenalty * 0.2)));
 
@@ -68,6 +70,6 @@ export function computeStability(
     p99Ms: Math.round(p99),
     spikes,
     longestSpikeMs,
-    throughputCov: Math.round(downloadCov * 1000) / 1000,
+    throughputCov: Math.round(throughputCov * 1000) / 1000,
   };
 }

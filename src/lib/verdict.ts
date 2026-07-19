@@ -52,7 +52,7 @@ export function judge(r: TestResult): Verdict {
     {
       name: "4K streaming",
       grade: g(r.downloadMbps > 50, r.downloadMbps > 25, r.downloadMbps > 15),
-      note: `${r.downloadMbps > 25 ? Math.floor(r.downloadMbps / 25) : 0} simultaneous 4K streams`,
+      note: `~${r.downloadMbps > 25 ? Math.floor(r.downloadMbps / 25) : 0} simultaneous 4K streams at 25 Mbps each`,
     },
     {
       name: "Video calls",

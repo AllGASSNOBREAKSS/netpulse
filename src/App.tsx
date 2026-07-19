@@ -172,11 +172,11 @@ export default function App() {
             if (s.mbps !== undefined) {
               setLiveMbps(s.mbps);
               setPeakMbps((peak) => Math.max(peak, s.mbps ?? 0));
-              // Live estimate only; the engine replaces it with measured
-              // payload bytes when the run finishes. Most windows are ~250 ms.
-              dataRef.current += s.mbps / 32;
-              setDataMB(dataRef.current);
             }
+          },
+          onBytes: (bytes) => {
+            dataRef.current = bytes / 1_000_000;
+            setDataMB(dataRef.current);
           },
           onPartial: (p) => setLive((prev) => ({ ...prev, ...p })),
         },
@@ -319,7 +319,8 @@ export default function App() {
                   >
                     <div className="metric__label">
                       {m.name}
-                      {m.experimental && <span className="metric__exp">exp</span>}
+                      {" "}
+                      <span className={`metric__source metric__source--${m.provenance}`}>{m.provenance}</span>
                     </div>
                     <div className="metric__value">
                       {v !== null ? (
@@ -384,18 +385,30 @@ export default function App() {
             {result && (
               <section className="report">
                 <ConfidencePanel confidence={result.confidence} />
-                <button className="method-btn" onClick={() => setShowMethod(true)}>
-                  Methodology &amp; raw data
-                </button>
+                <div className="report__actions">
+                  <button className="method-btn" onClick={() => setShowScore(true)}>
+                    Scoring breakdown
+                  </button>
+                  <button className="method-btn" onClick={() => setShowMethod(true)}>
+                    Methodology &amp; raw data
+                  </button>
+                </div>
               </section>
             )}
 
             <footer className="foot">
-              Speed and latency are measured live against Cloudflare's anycast speed endpoint from
-              your browser. True packet loss can't be measured by a web page, so the packet-loss card
-              shows an experimental UDP-reachability check instead and says so. Results reflect the
-              path to your nearest Cloudflare edge and will differ from other speed tests, which use
-              different servers and methods — see Methodology &amp; raw data above.
+              <div>
+                Speed and latency are measured live against Cloudflare's anycast speed endpoint from
+                your browser. True packet loss can't be measured by a web page, so the experimental
+                UDP-reachability card shows a related connectivity check instead. Results reflect
+                the path to your nearest Cloudflare edge and will differ from other speed tests, which
+                use different servers and methods — see Methodology &amp; raw data above.
+              </div>
+              <div className="foot__legal">
+                <div>© 2026 NetPulse and contributors.</div>
+                <div>Open-source software licensed under AGPL-3.0.</div>
+                <div>NetPulse is an independent project and is not affiliated with Ookla, Netflix, Speedtest, or FAST.com.</div>
+              </div>
             </footer>
           </>
         )}

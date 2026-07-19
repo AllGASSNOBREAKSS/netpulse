@@ -13,6 +13,7 @@ function fixture(over: Partial<TestResult>): TestResult {
     bufferbloatMs: 10,
     spikes: 0,
     probeCount: 20,
+    stability: { score: 100 },
     ...over,
   } as TestResult;
 }

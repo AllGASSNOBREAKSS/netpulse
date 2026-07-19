@@ -15,6 +15,7 @@ afterEach(() => {
 
 describe("throughput phases", () => {
   it("keeps a final partial window when a fast download ends before 250 ms", async () => {
+    const onBytes = vi.fn();
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: string | URL | Request) => {
@@ -24,13 +25,14 @@ describe("throughput phases", () => {
       }),
     );
 
-    const result = await downloadPhase(base);
+    const result = await downloadPhase({ ...base, onBytes });
 
     expect(result.bytes).toBe(1_024);
     expect(result.samples).toHaveLength(1);
     expect(result.mbps).toBeGreaterThan(0);
     expect(result.rtts).toHaveLength(1);
     expect(result.failedRequests).toBe(0);
+    expect(onBytes).toHaveBeenLastCalledWith(1_024);
   });
 
   it("rejects a download when the endpoint returns no usable data", async () => {
@@ -48,16 +50,19 @@ describe("throughput phases", () => {
   });
 
   it("measures a fast upload from its final partial window", async () => {
+    const onBytes = vi.fn();
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(new Uint8Array(), { status: 200 })),
     );
 
-    const result = await uploadPhase(base);
+    const result = await uploadPhase({ ...base, onBytes });
 
     expect(result.bytes).toBe(1_024);
     expect(result.samples).toHaveLength(1);
     expect(result.mbps).toBeGreaterThan(0);
     expect(result.failedRequests).toBe(0);
+    expect(result.peakMbps).toBe(result.mbps);
+    expect(onBytes).toHaveBeenLastCalledWith(1_024);
   });
 });
