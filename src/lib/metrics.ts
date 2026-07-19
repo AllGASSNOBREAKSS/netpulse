@@ -205,25 +205,23 @@ export const METRICS: MetricDef[] = [
   },
   {
     id: "packetLoss",
-    name: "UDP reachability",
+    name: "Packet loss",
     provenance: "experimental",
     experimental: true,
-    value: (r) => {
-      if (!r.packetLoss) return null;
-      return r.packetLoss.udpReachable === "yes"
-        ? "UDP OK"
-        : r.packetLoss.udpReachable === "no"
-          ? "UDP blocked?"
-          : "unknown";
-    },
-    sub: (r) => (r.packetLoss?.stunRttMs != null ? `STUN ${r.packetLoss.stunRttMs} ms` : "experimental probe"),
-    what: "Whether UDP can leave your network and reach a public STUN server. This is related to real-time app connectivity, but it is not a packet-loss measurement.",
-    how: "A WebRTC RTCPeerConnection gathers ICE candidates against public STUN servers. A server-reflexive (srflx) candidate means UDP egress works and reaches a STUN server, and we time how long that took. This is NOT an end-to-end loss percentage — that would need a cooperating UDP echo server, which NetPulse doesn't run yet.",
-    why: "Even 1–2% real loss makes calls robotic and games rubber-band. UDP reachability is a useful proxy: if UDP is blocked, real-time apps fall back to slower TCP relays. We label this experimental rather than inventing a loss number.",
+    unavailable: "A browser needs a cooperating UDP echo endpoint to measure end-to-end packet loss. NetPulse does not operate one yet, so no loss percentage is shown.",
+    value: () => null,
+    sub: (r) =>
+      r.packetLoss
+        ? `UDP reachability: ${r.packetLoss.udpReachable} (experimental)`
+        : "Measurement unavailable in this browser",
+    what: "The percentage of packets that never reach their destination or never return. NetPulse does not infer this from unrelated signals.",
+    how: "Direct packet loss is unavailable in the current browser test. Separately, an experimental WebRTC STUN probe checks whether UDP egress can reach a public STUN server. UDP reachability is not an end-to-end loss percentage and is never presented as one.",
+    why: "Even 1–2% real loss can make calls robotic and games rubber-band. That is why an unavailable result is more useful than an invented percentage.",
     bands: [
-      { range: "UDP OK", label: "srflx candidate found — UDP egress works" },
-      { range: "UDP blocked?", label: "No srflx — UDP may be firewalled or VPN-tunneled" },
-      { range: "unknown", label: "WebRTC unavailable or gathering timed out" },
+      { range: "0%", label: "No loss observed during a valid test" },
+      { range: "< 1%", label: "Usually acceptable for real-time use" },
+      { range: "1–2%", label: "Calls and games may degrade" },
+      { range: "> 2%", label: "Material connection instability" },
     ],
     action: () =>
       "For a real loss figure, measure from your OS: `ping -n 50 1.1.1.1` (Windows) or `ping -c 50 1.1.1.1` (macOS/Linux) and read the loss percentage.",

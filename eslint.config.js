@@ -19,7 +19,13 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
-      "react-refresh/only-export-components": ["error", { allowConstantExport: true }],
+      "react-refresh/only-export-components": [
+        "error",
+        {
+          allowConstantExport: true,
+          allowExportNames: ["badgeVariants", "buttonVariants", "tabsListVariants", "useSidebar"],
+        },
+      ],
     },
   },
 );

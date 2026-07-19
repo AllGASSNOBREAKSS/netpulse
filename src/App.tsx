@@ -1,122 +1,43 @@
-import { useCallback, useRef, useState } from "react";
-import Speedometer from "./components/Speedometer";
-import { ConnectionPrivacy, LatencyMonitor } from "./components/Panels";
+import { lazy, Suspense, useCallback, useRef, useState } from "react";
+import { AppShell, type AppView } from "./components/AppShell";
 import { MetricDetail, ScoreDetail } from "./components/MetricDetail";
-import { ConfidencePanel, MethodologyModal, PreflightServer } from "./components/Report";
+import { ConnectionPrivacy, LatencyMonitor } from "./components/Panels";
+import { MethodologyModal, PreflightServer } from "./components/Report";
+import {
+  ConnectionIdentity,
+  DiagnosisPanel,
+  HeroTestPanel,
+  HistoryView,
+  ImpactPanel,
+  MetricGrid,
+  NetPulseFooter,
+  RawDataPanel,
+} from "./components/SpeedTestSections";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card";
+import { Skeleton } from "./components/ui/skeleton";
 import { runTest, type Phase, type TestResult } from "./lib/engine";
+import { loadHistory, saveHistory, type HistoryEntry } from "./lib/history";
 import { METRICS } from "./lib/metrics";
 import type { Preflight, ServerSelection } from "./lib/types";
 import { judge, type Verdict } from "./lib/verdict";
 
-/* ---- History (localStorage) ------------------------------------------------ */
-type HistoryEntry = {
-  ts: number;
-  down: number;
-  up: number;
-  ping: number;
-  bloat: number;
-  grade: string;
-  score: number;
-  dataMB: number;
-};
-
-const HISTORY_KEY = "netpulse_history";
-const SIDEBAR_KEY = "netpulse_sidebar";
-
-function loadHistory(): HistoryEntry[] {
-  try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "[]");
-    return Array.isArray(parsed) ? parsed.filter(isHistoryEntry).slice(0, 50) : [];
-  } catch (error) {
-    console.warn("NetPulse could not read local test history.", error);
-    return [];
-  }
-}
-
-function isHistoryEntry(value: unknown): value is HistoryEntry {
-  if (!value || typeof value !== "object") return false;
-  const entry = value as Record<string, unknown>;
-  return (
-    typeof entry.ts === "number" &&
-    typeof entry.down === "number" &&
-    typeof entry.up === "number" &&
-    typeof entry.ping === "number" &&
-    typeof entry.bloat === "number" &&
-    typeof entry.grade === "string" &&
-    typeof entry.score === "number" &&
-    typeof entry.dataMB === "number"
-  );
-}
-
-function saveHistory(entries: HistoryEntry[]) {
-  try {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(entries.slice(0, 50)));
-  } catch (error) {
-    console.warn("NetPulse could not save local test history.", error);
-  }
-}
-
-/* ---- Navigation ------------------------------------------------------------ */
-type View = "speed" | "latency" | "privacy" | "history";
-
-const NAV: { view: View; label: string; icon: JSX.Element }[] = [
-  {
-    view: "speed",
-    label: "Speed test",
-    icon: (
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-        <path d="M2.5 11.5a6 6 0 1 1 11 0" strokeLinecap="round" />
-        <path d="M8 9.5 10.8 6" strokeLinecap="round" />
-      </svg>
-    ),
-  },
-  {
-    view: "latency",
-    label: "Latency monitor",
-    icon: (
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-        <path d="M1.5 8h3l2-4 3 8 2-4h3" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    ),
-  },
-  {
-    view: "privacy",
-    label: "Connection & Privacy",
-    icon: (
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-        <path d="M8 1.5 13.5 4v4c0 3.2-2.3 5.6-5.5 6.5C4.8 13.6 2.5 11.2 2.5 8V4L8 1.5Z" strokeLinejoin="round" />
-      </svg>
-    ),
-  },
-  {
-    view: "history",
-    label: "History",
-    icon: (
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-        <circle cx="8" cy="8" r="6" />
-        <path d="M8 4.5V8l2.5 1.5" strokeLinecap="round" />
-      </svg>
-    ),
-  },
-];
+const ResultCharts = lazy(() => import("./components/ResultCharts").then((module) => ({ default: module.ResultCharts })));
 
 const PHASE_LABEL: Record<Phase, string> = {
   idle: "Ready when you are",
   preflight: "Inspecting connection",
-  server: "Selecting best server",
+  server: "Selecting the best available server",
   latency: "Probing idle latency",
   download_single: "Download — single connection",
-  download_multi: "Download — multi connection",
+  download_multi: "Download — multiple connections",
   upload: "Measuring upload",
-  packetloss: "Checking UDP reachability",
+  packetloss: "Checking experimental UDP reachability",
   done: "Test complete",
   error: "Test failed — check your connection and retry",
 };
 
-/* ---- App ------------------------------------------------------------------- */
 export default function App() {
-  const [view, setView] = useState<View>("speed");
-  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(SIDEBAR_KEY) === "1");
+  const [view, setView] = useState<AppView>("speed");
   const [phase, setPhase] = useState<Phase>("idle");
   const [live, setLive] = useState<Partial<TestResult>>({});
   const [result, setResult] = useState<TestResult | null>(null);
@@ -132,21 +53,11 @@ export default function App() {
   const [preflight, setPreflight] = useState<Preflight | null>(null);
   const [server, setServer] = useState<ServerSelection | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [shareStatus, setShareStatus] = useState<string | null>(null);
   const runningRef = useRef(false);
   const dataRef = useRef(0);
 
   const running = phase !== "idle" && phase !== "done" && phase !== "error";
-
-  const toggleSidebar = useCallback(() => {
-    setCollapsed((c) => {
-      try {
-        localStorage.setItem(SIDEBAR_KEY, c ? "0" : "1");
-      } catch (error) {
-        console.warn("NetPulse could not save the sidebar preference.", error);
-      }
-      return !c;
-    });
-  }, []);
 
   const start = useCallback(async () => {
     if (runningRef.current) return;
@@ -159,45 +70,49 @@ export default function App() {
     setPreflight(null);
     setServer(null);
     setErrorMessage(null);
+    setShareStatus(null);
     dataRef.current = 0;
     setDataMB(0);
+
     try {
-      const r = await runTest(
+      const measured = await runTest(
         { lowData },
         {
           onPhase: setPhase,
           onPreflight: setPreflight,
           onServer: setServer,
-          onSample: (s) => {
-            if (s.mbps !== undefined) {
-              setLiveMbps(s.mbps);
-              setPeakMbps((peak) => Math.max(peak, s.mbps ?? 0));
+          onSample: (sample) => {
+            if (sample.mbps !== undefined) {
+              setLiveMbps(sample.mbps);
+              setPeakMbps((peak) => Math.max(peak, sample.mbps ?? 0));
             }
           },
           onBytes: (bytes) => {
             dataRef.current = bytes / 1_000_000;
             setDataMB(dataRef.current);
           },
-          onPartial: (p) => setLive((prev) => ({ ...prev, ...p })),
+          onPartial: (partial) => setLive((previous) => ({ ...previous, ...partial })),
         },
       );
-      setResult(r);
-      setLiveMbps(r.downloadMbps); // needle settles on the download result
-      setDataMB(r.dataUsedMB); // measured application payload from the engine
-      const v = judge(r);
-      setVerdict(v);
+
+      setResult(measured);
+      setLiveMbps(measured.downloadMbps);
+      setDataMB(measured.dataUsedMB);
+      const nextVerdict = judge(measured);
+      setVerdict(nextVerdict);
       const entry: HistoryEntry = {
-        ts: r.timestamp,
-        down: r.downloadMbps,
-        up: r.uploadMbps,
-        ping: r.idlePingMs,
-        bloat: r.bufferbloatMs,
-        grade: r.bufferbloatGrade,
-        score: v.score,
-        dataMB: r.dataUsedMB,
+        ts: measured.timestamp,
+        down: measured.downloadMbps,
+        up: measured.uploadMbps,
+        ping: measured.idlePingMs,
+        bloat: measured.bufferbloatMs,
+        grade: measured.bufferbloatGrade,
+        score: nextVerdict.score,
+        dataMB: measured.dataUsedMB,
+        confidence: measured.confidence.score,
       };
-      setHistory((prev) => {
-        const next = [entry, ...prev];
+      setHistory((previous) => {
+        const next = [entry, ...previous];
         saveHistory(next);
         return next;
       });
@@ -210,281 +125,105 @@ export default function App() {
     }
   }, [lowData]);
 
-  const openDef = openMetric ? METRICS.find((m) => m.id === openMetric) : null;
+  const shareResult = useCallback(async () => {
+    if (!result || !verdict) return;
+    const text = `NetPulse result: ${verdict.score}/100 health · ${formatSpeed(result.downloadMbps)} Mbps down · ${formatSpeed(result.uploadMbps)} Mbps up · ${Math.round(result.idlePingMs)} ms idle latency · bufferbloat ${result.bufferbloatGrade}.`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: "NetPulse connection result", text });
+        setShareStatus("Shared a privacy-safe summary.");
+      } else {
+        await navigator.clipboard.writeText(text);
+        setShareStatus("Privacy-safe summary copied.");
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setShareStatus("Share canceled.");
+      } else {
+        console.warn("NetPulse could not share this result.", error);
+        setShareStatus("Sharing is unavailable in this browser.");
+      }
+    }
+  }, [result, verdict]);
+
+  const openDef = openMetric ? METRICS.find((metric) => metric.id === openMetric) : null;
+  const previous = result ? history.find((entry) => entry.ts !== result.timestamp) ?? null : history[0] ?? null;
+  const status = phase === "error" && errorMessage ? errorMessage : PHASE_LABEL[phase];
 
   return (
-    <div className="app" data-collapsed={collapsed || undefined}>
-      {/* ---- Sidebar ---- */}
-      <aside className="sidebar">
-        <div className="sidebar__top">
-          <div className="brand">
-            <span className="brand__full">
-              net<span className="brand__accent">pulse</span>
-            </span>
-            <span className="brand__mini" aria-hidden="true">
-              n<span className="brand__accent">p</span>
-            </span>
-            <em className="brand__tag">internet health console</em>
-          </div>
-          <button
-            className="collapse-btn"
-            onClick={toggleSidebar}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
-              {collapsed ? (
-                <path d="M6 3.5 10.5 8 6 12.5" strokeLinecap="round" strokeLinejoin="round" />
-              ) : (
-                <path d="M10 3.5 5.5 8 10 12.5" strokeLinecap="round" strokeLinejoin="round" />
-              )}
-            </svg>
-          </button>
+    <AppShell view={view} onViewChange={setView} lowData={lowData} onLowDataChange={setLowData}>
+      {view === "speed" && (
+        <div className="speed-page">
+          <HeroTestPanel
+            phase={phase}
+            running={running}
+            lowData={lowData}
+            liveMbps={liveMbps}
+            peakMbps={peakMbps}
+            idlePingMs={live.idlePingMs}
+            dataUsedMB={dataMB}
+            result={result}
+            verdict={verdict}
+            status={status}
+            shareStatus={shareStatus}
+            onStart={() => void start()}
+            onScore={() => setShowScore(true)}
+            onShare={() => void shareResult()}
+          />
+
+          {(preflight || server) && <PreflightServer preflight={preflight} server={server} preOnly={!result} />}
+          <ConnectionIdentity preflight={preflight} server={server} result={result} />
+          <MetricGrid
+            metrics={METRICS}
+            current={result ?? live}
+            result={result}
+            phase={phase}
+            running={running}
+            onOpen={setOpenMetric}
+          />
+          <DiagnosisPanel verdict={verdict} />
+          <ImpactPanel verdict={verdict} result={result} />
+          <Suspense fallback={<Card className="result-section"><CardContent className="chart-loading"><Skeleton className="h-[280px] w-full" /></CardContent></Card>}>
+            <ResultCharts result={result} previous={previous} />
+          </Suspense>
+          <RawDataPanel result={result} onScore={() => setShowScore(true)} onMethod={() => setShowMethod(true)} />
+          <NetPulseFooter />
         </div>
+      )}
 
-        <nav className="nav">
-          <div className="nav__label">Diagnostics</div>
-          {NAV.slice(0, 2).map((n) => (
-            <NavItem key={n.view} item={n} active={view === n.view} onSelect={setView} />
-          ))}
-          <div className="nav__label">Network</div>
-          {NAV.slice(2, 3).map((n) => (
-            <NavItem key={n.view} item={n} active={view === n.view} onSelect={setView} />
-          ))}
-          <div className="nav__label">Records</div>
-          {NAV.slice(3).map((n) => (
-            <NavItem key={n.view} item={n} active={view === n.view} onSelect={setView} />
-          ))}
-        </nav>
-
-        <div className="sidebar__foot">
-          <label className="lowdata" title="Cap the test at roughly 40 MB for metered connections">
-            <input
-              type="checkbox"
-              checked={lowData}
-              onChange={(e) => setLowData(e.target.checked)}
-              disabled={running}
-            />
-            <span className="lowdata__text">low-data mode</span>
-          </label>
-          <div className="sidebar__note">
-            Full test moves ~100–400&nbsp;MB.
-            <br />
-            Low-data targets ~40&nbsp;MB.
-          </div>
+      {view === "blackbox" && (
+        <div className="view-stack">
+          <Card className="page-card">
+            <CardHeader>
+              <CardTitle>Connection Black Box preview</CardTitle>
+              <CardDescription>
+                This is the existing lightweight latency monitor, not the planned recorder. It stores nothing and does not claim packet loss, DNS failures, or background-tab accuracy.
+              </CardDescription>
+            </CardHeader>
+            <CardContent><LatencyMonitor /></CardContent>
+          </Card>
+          <NetPulseFooter />
         </div>
-      </aside>
+      )}
 
-      {/* ---- Main ---- */}
-      <main className="main">
-        {view === "speed" && (
-          <>
-            <section className="stage">
-              <Speedometer
-                liveMbps={liveMbps}
-                peakMbps={peakMbps}
-                phase={phase}
-                idlePingMs={live.idlePingMs}
-                dataUsedMB={dataMB}
-                finalScore={verdict?.score ?? null}
-                lowData={lowData}
-                onScoreClick={() => setShowScore(true)}
-              />
-              <div className="stage__status" role="status">
-                {running && <span className="pulse-dot" aria-hidden="true" />}
-                {phase === "error" && errorMessage ? errorMessage : PHASE_LABEL[phase]}
-                {result && verdict && <strong> — {verdict.headline}</strong>}
-              </div>
-              <button className="runbtn" onClick={() => void start()} disabled={running}>
-                {running ? "Testing…" : result ? "Run again" : "Start"}
-              </button>
-            </section>
+      {view === "connection" && (
+        <div className="view-stack">
+          <Card className="page-card"><CardContent className="legacy-panel-wrap"><ConnectionPrivacy /></CardContent></Card>
+          <NetPulseFooter />
+        </div>
+      )}
 
-            {(preflight || server) && (
-              <PreflightServer preflight={preflight} server={server} preOnly={!result} />
-            )}
+      {view === "history" && (
+        <div className="view-stack">
+          <HistoryView history={history} onClear={() => { setHistory([]); saveHistory([]); }} />
+          <NetPulseFooter />
+        </div>
+      )}
 
-            <p className="metrics__hint">Click any metric to see what it means and how it was measured.</p>
-            <section className="metrics">
-              {METRICS.map((m) => {
-                const v = m.value(result ?? live);
-                const sub = m.sub ? m.sub(result ?? live) : null;
-                const hot = running && m.hotPhase !== undefined && phase.startsWith(m.hotPhase);
-                return (
-                  <button
-                    key={m.id}
-                    className="metric"
-                    data-hot={hot || undefined}
-                    onClick={() => setOpenMetric(m.id)}
-                  >
-                    <div className="metric__label">
-                      {m.name}
-                      {" "}
-                      <span className={`metric__source metric__source--${m.provenance}`}>{m.provenance}</span>
-                    </div>
-                    <div className="metric__value">
-                      {v !== null ? (
-                        v
-                      ) : (
-                        <span className="metric__idle">—</span>
-                      )}
-                    </div>
-                    <div className="metric__sub">{sub ?? " "}</div>
-                  </button>
-                );
-              })}
-            </section>
-
-            {verdict && result && (
-              <section className="verdict">
-                <div className="verdict__col">
-                  <h2 className="verdict__h">Real-world impact</h2>
-                  <div className="activities">
-                    {verdict.activities.map((a) => (
-                      <div key={a.name} className="activity">
-                        <span className={`grade grade--${a.grade.toLowerCase()}`}>{a.grade}</span>
-                        <div>
-                          <div className="activity__name">{a.name}</div>
-                          <div className="activity__note">{a.note}</div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div className="verdict__col">
-                  <h2 className="verdict__h">Diagnosis</h2>
-                  {verdict.good.length > 0 && (
-                    <ul className="diag diag--good">
-                      {verdict.good.map((s) => (
-                        <li key={s}>{s}</li>
-                      ))}
-                    </ul>
-                  )}
-                  {verdict.bad.length > 0 && (
-                    <ul className="diag diag--bad">
-                      {verdict.bad.map((s) => (
-                        <li key={s}>{s}</li>
-                      ))}
-                    </ul>
-                  )}
-                  <h2 className="verdict__h">Next actions</h2>
-                  <ol className="actions">
-                    {verdict.actions.map((s) => (
-                      <li key={s}>{s}</li>
-                    ))}
-                  </ol>
-                  {verdict.dontBuy && (
-                    <div className="dontbuy">
-                      <span>Don't waste money on:</span> {verdict.dontBuy}
-                    </div>
-                  )}
-                </div>
-              </section>
-            )}
-
-            {result && (
-              <section className="report">
-                <ConfidencePanel confidence={result.confidence} />
-                <div className="report__actions">
-                  <button className="method-btn" onClick={() => setShowScore(true)}>
-                    Scoring breakdown
-                  </button>
-                  <button className="method-btn" onClick={() => setShowMethod(true)}>
-                    Methodology &amp; raw data
-                  </button>
-                </div>
-              </section>
-            )}
-
-            <footer className="foot">
-              <div>
-                Speed and latency are measured live against Cloudflare's anycast speed endpoint from
-                your browser. True packet loss can't be measured by a web page, so the experimental
-                UDP-reachability card shows a related connectivity check instead. Results reflect
-                the path to your nearest Cloudflare edge and will differ from other speed tests, which
-                use different servers and methods — see Methodology &amp; raw data above.
-              </div>
-              <div className="foot__legal">
-                <div>© 2026 NetPulse and contributors.</div>
-                <div>Open-source software licensed under AGPL-3.0.</div>
-                <div>NetPulse is an independent project and is not affiliated with Ookla, Netflix, Speedtest, or FAST.com.</div>
-              </div>
-            </footer>
-          </>
-        )}
-
-        {view === "latency" && <LatencyMonitor />}
-        {view === "privacy" && <ConnectionPrivacy />}
-
-        {view === "history" && (
-          <div className="panel">
-            <div className="panel__head">
-              <div>
-                <h1 className="panel__title">Test history</h1>
-                <p className="panel__sub">Every result stays on this device — nothing is uploaded.</p>
-              </div>
-              {history.length > 0 && (
-                <button
-                  className="history__clear"
-                  onClick={() => {
-                    setHistory([]);
-                    saveHistory([]);
-                  }}
-                >
-                  clear all
-                </button>
-              )}
-            </div>
-            {history.length === 0 ? (
-              <p className="panel__note">No tests yet — run one from the Speed test tab.</p>
-            ) : (
-              <table className="history-table">
-                <thead>
-                  <tr>
-                    <th>when</th>
-                    <th>score</th>
-                    <th>down</th>
-                    <th>up</th>
-                    <th>ping</th>
-                    <th>bloat</th>
-                    <th>data</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {history.slice(0, 20).map((h) => (
-                    <tr key={h.ts}>
-                      <td>
-                        {new Date(h.ts).toLocaleString([], {
-                          month: "short",
-                          day: "numeric",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </td>
-                      <td className="num">{h.score}</td>
-                      <td className="num">{h.down >= 100 ? Math.round(h.down) : h.down.toFixed(1)}</td>
-                      <td className="num">{h.up >= 100 ? Math.round(h.up) : h.up.toFixed(1)}</td>
-                      <td className="num">{Math.round(h.ping)}ms</td>
-                      <td className="num">{h.grade}</td>
-                      <td className="num">{h.dataMB.toFixed(0)}MB</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        )}
-      </main>
-
-      {/* ---- Detail panels ---- */}
       {openDef && <MetricDetail def={openDef} result={result} onClose={() => setOpenMetric(null)} />}
-      {showScore && verdict && (
-        <ScoreDetail score={verdict.score} parts={verdict.breakdown} onClose={() => setShowScore(false)} />
-      )}
-      {showMethod && result && (
-        <MethodologyModal result={result} verdict={verdict} onClose={() => setShowMethod(false)} />
-      )}
-    </div>
+      {showScore && verdict && <ScoreDetail score={verdict.score} parts={verdict.breakdown} onClose={() => setShowScore(false)} />}
+      {showMethod && result && <MethodologyModal result={result} verdict={verdict} onClose={() => setShowMethod(false)} />}
+    </AppShell>
   );
 }
 
@@ -493,24 +232,6 @@ function toRunErrorMessage(error: unknown): string {
   return `Test failed — ${detail} Check your connection and retry.`;
 }
 
-function NavItem({
-  item,
-  active,
-  onSelect,
-}: {
-  item: (typeof NAV)[number];
-  active: boolean;
-  onSelect: (v: View) => void;
-}) {
-  return (
-    <button
-      className="nav__item"
-      data-active={active || undefined}
-      onClick={() => onSelect(item.view)}
-      title={item.label}
-    >
-      <span className="nav__icon">{item.icon}</span>
-      <span className="nav__text">{item.label}</span>
-    </button>
-  );
+function formatSpeed(value: number): string {
+  return value >= 100 ? String(Math.round(value)) : value.toFixed(1);
 }

@@ -158,8 +158,8 @@ export default function Speedometer({
       <svg viewBox="0 0 400 400" className="speedo__dial" aria-hidden="true">
         <defs>
           <linearGradient id="sweep" x1="0%" y1="100%" x2="0%" y2="0%">
-            <stop offset="0%" stopColor="#1d4ed8" />
-            <stop offset="100%" stopColor="#60a5fa" />
+            <stop offset="0%" stopColor="var(--blue-deep)" />
+            <stop offset="100%" stopColor="var(--blue)" />
           </linearGradient>
         </defs>
 

@@ -57,7 +57,7 @@ A staged pipeline — full detail in **[ENGINE.md](ENGINE.md)**:
 | Loaded latency | Probed *while saturating* download, then upload — kept **separate** |
 | Bufferbloat | Loaded − idle rise, **separate download/upload grades A–F** |
 | Stability | 0–100 from latency stddev + spikes + throughput variation; P95/P99; longest spike |
-| UDP reachability | **Experimental** WebRTC/STUN check — *not* an end-to-end packet-loss percentage |
+| Packet loss | **Unavailable** without a cooperating UDP echo endpoint; an experimental WebRTC/STUN reachability signal is kept separate and never shown as loss |
 | Confidence | 0–100 trust score with every deduction shown: sampling, variation, server stability, tab visibility, completion, errors |
 
 From the results it derives a **transparent 0–100 health score** (formula in one
@@ -82,8 +82,11 @@ inspectable and exportable as JSON.
 - 🧮 Transparent health score — the formula lives in one documented file
   ([`src/lib/scoring.ts`](src/lib/scoring.ts)); click the score for a full
   per-component breakdown with weights
-- 🧭 Collapsible dashboard sidebar: Speed test · Latency monitor · Connection &
-  Privacy · History
+- 🧭 Responsive shadcn/ui dashboard shell with a collapsible desktop sidebar,
+  mobile drawer, keyboard navigation, theme controls, and honest disabled states
+  for planned workflows
+- 📈 Real-data charts for latency, throughput, idle-versus-loaded latency,
+  stability, and locally saved previous-test comparison
 - 📉 Live latency monitor — continuous 500 ms probes with spike/drop detection,
   run it while you game or join calls
 - 🔒 Connection & Privacy panel — public IP (masked by default), nearest edge,
@@ -104,7 +107,7 @@ inspectable and exportable as JSON.
 ## Honest limitations
 
 - **Packet loss is unavailable.** True end-to-end loss needs a UDP echo server
-  NetPulse doesn't run. The experimental **UDP reachability** card performs a
+  NetPulse doesn't run. A separate experimental **UDP reachability** signal performs a
   real WebRTC/STUN connectivity check and points to an OS-level `ping`; it never
   invents a loss percentage.
 - Browser fetch exposes received download chunks, but not byte-level upload
@@ -144,8 +147,8 @@ No API keys, no backend, no account — it runs entirely in the browser.
 
 ## Tech
 
-Vite · React · TypeScript · SVG · Vitest. Zero runtime dependencies beyond
-React. Throughput/latency use the Cloudflare speed endpoints (`__down` /
+Vite · React · TypeScript · Tailwind CSS · shadcn/ui · selected ARC UI web
+components · Recharts · SVG · Vitest. Throughput/latency use the Cloudflare speed endpoints (`__down` /
 `__up`), the same infrastructure behind
 [speed.cloudflare.com](https://speed.cloudflare.com); the experimental
 packet-loss card uses WebRTC against public STUN servers. Run `npm test` for the
@@ -154,6 +157,11 @@ measurement-logic suite.
 The engine is modular under `src/lib/` — `preflight`, `servers`, `latency`,
 `throughput`, `grading`, `packetloss`, `confidence`, `scoring`, `stats`, with
 `engine.ts` sequencing them.
+
+The interface uses centralized light/dark/system tokens in `src/styles.css`.
+shadcn/ui owns interactive primitives and charts; ARC UI is limited to telemetry
+and status elements so the two systems do not compete for the same primitive.
+Theme and sidebar preferences are stored locally.
 
 ## Roadmap
 
