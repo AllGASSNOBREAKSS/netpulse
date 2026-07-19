@@ -58,9 +58,16 @@ async function familyReachable(url: string, timeoutMs = 3500): Promise<TriState>
 }
 
 type TraceInfo = Record<string, string>;
-async function fetchTrace(): Promise<TraceInfo | null> {
+async function fetchTrace(timeoutMs = 5000): Promise<TraceInfo | null> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const t = await (await fetch(getServer(undefined).tracePath, { cache: "no-store" })).text();
+    const response = await fetch(getServer(undefined).tracePath, {
+      cache: "no-store",
+      signal: ctrl.signal,
+    });
+    if (!response.ok) return null;
+    const t = await response.text();
     const info: TraceInfo = {};
     for (const line of t.trim().split("\n")) {
       const [k, v] = line.split("=");
@@ -69,6 +76,8 @@ async function fetchTrace(): Promise<TraceInfo | null> {
     return info;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
