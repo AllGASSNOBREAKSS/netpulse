@@ -60,15 +60,18 @@ export default function Speedometer({
   const peakRef = useRef(0);
   const lastTickRef = useRef(0);
 
+  const isDownload = phase === "download_single" || phase === "download_multi";
+  const isLoading = isDownload || phase === "upload";
+
   // Feed the spring's target from live samples.
   useEffect(() => {
     const p = physics.current;
-    if (liveMbps !== null && (phase === "download" || phase === "upload")) {
+    if (liveMbps !== null && isLoading) {
       p.target = liveMbps;
     } else if (phase === "done" || phase === "idle" || phase === "error") {
       p.target = liveMbps ?? 0;
     } else {
-      p.target = 0; // latency phase: needle rests
+      p.target = 0; // preflight/server/latency/packetloss: needle rests
     }
     // Keep the dial scale ahead of whatever the needle is chasing.
     if (p.target > peakRef.current) {
@@ -92,9 +95,9 @@ export default function Speedometer({
     return () => clearInterval(watchdog);
   }, []);
 
-  // Reset between runs.
+  // Reset between runs — the first phase of any run is preflight.
   useEffect(() => {
-    if (phase === "latency") {
+    if (phase === "preflight") {
       peakRef.current = 0;
       setMax(240);
       physics.current.target = 0;
@@ -132,29 +135,30 @@ export default function Speedometer({
   const [nx1, ny1] = polar(needleDeg, R_ARC - 30);
   const [nx2, ny2] = polar(needleDeg, R_RING - 4);
 
-  const isLoading = phase === "download" || phase === "upload";
   // Once the test is done the numeral is the measured result, straight from
   // the engine — the spring only drives the needle's settle animation.
   const shown = phase === "done" ? (liveMbps ?? display) : isLoading ? display : 0;
-  const numeral =
-    phase === "latency"
-      ? "···"
-      : shown >= 100
-        ? String(Math.round(shown))
-        : shown.toFixed(1);
+  const waiting = phase === "preflight" || phase === "server" || phase === "latency" || phase === "packetloss";
+  const numeral = waiting ? "···" : shown >= 100 ? String(Math.round(shown)) : shown.toFixed(1);
 
   // Gear = test phase, labeled with the stream count that actually runs.
   const profile = lowData ? PROFILES.lowData : PROFILES.full;
   const gear =
-    phase === "download"
-      ? `D${profile.dlStreams}`
-      : phase === "upload"
-        ? `U${profile.ulStreams}`
-        : phase === "latency"
-          ? "P"
-          : phase === "done"
-            ? "N"
-            : "—";
+    phase === "download_single"
+      ? "D1"
+      : phase === "download_multi"
+        ? `D${profile.dlStreams}`
+        : phase === "upload"
+          ? `U${profile.ulStreams}`
+          : phase === "latency"
+            ? "P"
+            : phase === "preflight" || phase === "server"
+              ? "•"
+              : phase === "packetloss"
+                ? "PL"
+                : phase === "done"
+                  ? "N"
+                  : "—";
 
   // Redline: top 8% of the dial.
   const redFrom = START_DEG + SWEEP_DEG * 0.92;

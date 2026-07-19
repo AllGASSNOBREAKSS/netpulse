@@ -352,6 +352,132 @@ html, body {
 .metric__idle { color: var(--line); }
 .metric__na { color: var(--muted); font-size: 16px; }
 .metric__sub { margin-top: 2px; font-size: 11px; color: var(--muted); min-height: 17px; }
+.metric__exp {
+  margin-left: 6px;
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--amber);
+  border: 1px solid rgba(255, 180, 84, 0.4);
+  border-radius: 5px;
+  padding: 1px 4px;
+  vertical-align: middle;
+}
+
+/* ---- Preflight + server summary ---- */
+.pf {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-top: 16px;
+}
+.pf__group {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  padding: 12px 14px;
+}
+.pf__h {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 9px;
+}
+.pf__manual {
+  margin-left: 6px;
+  color: var(--blue);
+  border: 1px solid rgba(96, 165, 250, 0.4);
+  border-radius: 5px;
+  padding: 0 5px;
+  font-size: 8px;
+}
+.pf__chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 3px 8px;
+  font-size: 11.5px;
+}
+.chip[data-warn] { border-color: rgba(255, 180, 84, 0.5); }
+.chip__k { font-family: var(--mono); font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.chip__v { font-weight: 500; }
+.chip[data-warn] .chip__v { color: var(--amber); }
+.pf__reason, .pf__est { margin-top: 9px; font-size: 12px; color: var(--muted); line-height: 1.5; }
+
+/* ---- Confidence ---- */
+.report {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 26px;
+  border-top: 1px solid var(--line);
+  padding-top: 20px;
+}
+.conf {
+  flex: 1 1 320px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  padding: 14px 16px;
+}
+.conf__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.conf__label {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.conf__score { font-family: var(--cluster); font-style: italic; font-weight: 800; font-size: 30px; line-height: 1; }
+.conf__score--good { color: var(--green); }
+.conf__score--fair { color: var(--amber); }
+.conf__score--poor { color: var(--red); }
+.conf__toggle {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--blue);
+  background: none;
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  border-radius: 7px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.conf__summary { margin-top: 8px; font-size: 13px; color: var(--muted); }
+.conf__reasons { list-style: none; margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.conf__reasons li { display: flex; gap: 8px; font-size: 12.5px; align-items: baseline; }
+.conf__dot {
+  flex-shrink: 0;
+  width: 16px; height: 16px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 700;
+}
+.conf__reasons li[data-ok="true"] .conf__dot { background: rgba(74, 222, 128, 0.15); color: var(--green); }
+.conf__reasons li[data-ok="false"] .conf__dot { background: rgba(255, 180, 84, 0.15); color: var(--amber); }
+
+.method-btn {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 18px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.method-btn:hover { border-color: var(--blue); color: var(--blue); }
+
+.export-btns { display: flex; gap: 10px; flex-wrap: wrap; }
 
 /* ================= Modal ================= */
 .modal-backdrop {
@@ -678,6 +804,7 @@ html, body {
   .lowdata__text, .app[data-collapsed] .lowdata__text { display: inline; }
   .sidebar__note, .app[data-collapsed] .sidebar__note { display: none; }
   .verdict { grid-template-columns: 1fr; }
+  .pf { grid-template-columns: 1fr; }
 }
 @media (max-width: 520px) {
   .runbtn { width: 100%; }

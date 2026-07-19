@@ -2,8 +2,10 @@ import { useCallback, useRef, useState } from "react";
 import Speedometer from "./components/Speedometer";
 import { ConnectionPrivacy, Devices, LatencyMonitor } from "./components/Panels";
 import { MetricDetail, ScoreDetail } from "./components/MetricDetail";
+import { ConfidencePanel, MethodologyModal, PreflightServer } from "./components/Report";
 import { runTest, type Phase, type TestResult } from "./lib/engine";
 import { METRICS } from "./lib/metrics";
+import type { Preflight, ServerSelection } from "./lib/types";
 import { judge, type Verdict } from "./lib/verdict";
 
 /* ---- History (localStorage) ------------------------------------------------ */
@@ -91,9 +93,13 @@ const NAV: { view: View; label: string; icon: JSX.Element }[] = [
 
 const PHASE_LABEL: Record<Phase, string> = {
   idle: "Ready when you are",
+  preflight: "Inspecting connection",
+  server: "Selecting best server",
   latency: "Probing idle latency",
-  download: "Measuring download",
+  download_single: "Download — single connection",
+  download_multi: "Download — multi connection",
   upload: "Measuring upload",
+  packetloss: "Checking UDP reachability",
   done: "Test complete",
   error: "Test failed — check your connection and retry",
 };
@@ -112,10 +118,13 @@ export default function App() {
   const [dataMB, setDataMB] = useState(0);
   const [openMetric, setOpenMetric] = useState<string | null>(null);
   const [showScore, setShowScore] = useState(false);
+  const [showMethod, setShowMethod] = useState(false);
+  const [preflight, setPreflight] = useState<Preflight | null>(null);
+  const [server, setServer] = useState<ServerSelection | null>(null);
   const runningRef = useRef(false);
   const dataRef = useRef(0);
 
-  const running = phase === "latency" || phase === "download" || phase === "upload";
+  const running = phase !== "idle" && phase !== "done" && phase !== "error";
 
   const toggleSidebar = useCallback(() => {
     setCollapsed((c) => {
@@ -133,6 +142,8 @@ export default function App() {
     setResult(null);
     setVerdict(null);
     setLiveMbps(null);
+    setPreflight(null);
+    setServer(null);
     dataRef.current = 0;
     setDataMB(0);
     try {
@@ -140,6 +151,8 @@ export default function App() {
         { lowData },
         {
           onPhase: setPhase,
+          onPreflight: setPreflight,
+          onServer: setServer,
           onSample: (s) => {
             if (s.mbps !== undefined) {
               setLiveMbps(s.mbps);
@@ -267,30 +280,35 @@ export default function App() {
               </button>
             </section>
 
+            {(preflight || server) && (
+              <PreflightServer preflight={preflight} server={server} preOnly={!result} />
+            )}
+
             <p className="metrics__hint">Click any metric to see what it means and how it was measured.</p>
             <section className="metrics">
               {METRICS.map((m) => {
                 const v = m.value(result ?? live);
                 const sub = m.sub ? m.sub(result ?? live) : null;
+                const hot = running && m.hotPhase !== undefined && phase.startsWith(m.hotPhase);
                 return (
                   <button
                     key={m.id}
                     className="metric"
-                    data-hot={(running && m.hotPhase === phase) || undefined}
-                    data-na={m.unavailable ? true : undefined}
+                    data-hot={hot || undefined}
                     onClick={() => setOpenMetric(m.id)}
                   >
-                    <div className="metric__label">{m.name}</div>
+                    <div className="metric__label">
+                      {m.name}
+                      {m.experimental && <span className="metric__exp">exp</span>}
+                    </div>
                     <div className="metric__value">
-                      {m.unavailable ? (
-                        <span className="metric__na">n/a</span>
-                      ) : v !== null ? (
+                      {v !== null ? (
                         v
                       ) : (
                         <span className="metric__idle">—</span>
                       )}
                     </div>
-                    <div className="metric__sub">{m.unavailable ? "not measurable in-browser" : sub ?? " "}</div>
+                    <div className="metric__sub">{sub ?? " "}</div>
                   </button>
                 );
               })}
@@ -343,10 +361,21 @@ export default function App() {
               </section>
             )}
 
+            {result && (
+              <section className="report">
+                <ConfidencePanel confidence={result.confidence} />
+                <button className="method-btn" onClick={() => setShowMethod(true)}>
+                  Methodology &amp; raw data
+                </button>
+              </section>
+            )}
+
             <footer className="foot">
-              Speed and latency are measured live against Cloudflare's speed endpoints from your
-              browser. Packet loss can't be measured reliably by a web page, so NetPulse doesn't
-              show it. Results depend on your device and the network path to the test server.
+              Speed and latency are measured live against Cloudflare's anycast speed endpoint from
+              your browser. True packet loss can't be measured by a web page, so the packet-loss card
+              shows an experimental UDP-reachability check instead and says so. Results reflect the
+              path to your nearest Cloudflare edge and will differ from other speed tests, which use
+              different servers and methods — see Methodology &amp; raw data above.
             </footer>
           </>
         )}
@@ -419,6 +448,9 @@ export default function App() {
       {openDef && <MetricDetail def={openDef} result={result} onClose={() => setOpenMetric(null)} />}
       {showScore && verdict && (
         <ScoreDetail score={verdict.score} parts={verdict.breakdown} onClose={() => setShowScore(false)} />
+      )}
+      {showMethod && result && (
+        <MethodologyModal result={result} verdict={verdict} onClose={() => setShowMethod(false)} />
       )}
     </div>
   );

@@ -23,6 +23,12 @@ export function MetricDetail({
           <strong>Not measured.</strong> {def.unavailable}
         </div>
       )}
+      {def.experimental && !def.unavailable && (
+        <div className="mi__unavailable">
+          <strong>Experimental.</strong> This shows a related, honestly-labeled signal — not a definitive
+          measurement of this metric. Read “How it's measured” for exactly what the number means.
+        </div>
+      )}
 
       <section className="mi">
         <h3 className="mi__h">What it means</h3>

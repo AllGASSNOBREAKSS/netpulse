@@ -45,18 +45,29 @@ you get:
 
 ## What it measures
 
-| Metric | How |
-| --- | --- |
-| Download / upload throughput | Parallel streams to `speed.cloudflare.com`, median of the top-half samples (ignores TCP ramp-up) |
-| Idle latency + jitter | Timed zero-byte probes; median + mean absolute delta |
-| **Loaded latency (bufferbloat)** | Latency probed *while saturating* download, then upload; graded **A–F** |
-| Stability | Count of latency spikes during load |
-| Data used | Bytes transferred, shown per test |
+A staged pipeline — full detail in **[ENGINE.md](ENGINE.md)**:
 
-From those it derives a **0–100 health score**, eight **real-world activity
-grades** (competitive gaming, gaming-while-downloading, 4K streaming, video
-calls, cloud gaming, livestreaming, large uploads, everyday browsing), a
-plain-English diagnosis, and prioritized fixes.
+| Stage | How |
+| --- | --- |
+| Preflight | Browser, OS, device, tab state, IPv4/IPv6 availability, secure context, **possible** VPN/proxy (heuristic), estimated duration + data |
+| Server selection | Probes candidates, ranks by median latency + jitter + availability, explains the pick |
+| Idle latency | Timed zero-byte probes (`performance.now()`) → min / median / mean / **P95 / P99** / jitter |
+| Download | **Single- then multi-connection**, cache-busted, no-store, rolling samples, early-stop on steadiness, duration/data caps; top-half median |
+| Upload | Parallel POST of in-memory random payloads; reliable + **peak** throughput |
+| Loaded latency | Probed *while saturating* download, then upload — kept **separate** |
+| Bufferbloat | Loaded − idle rise, **separate download/upload grades A–F** |
+| Stability | 0–100 from latency stddev + spikes + throughput variation; P95/P99; longest spike |
+| Packet loss | **Experimental** WebRTC/STUN UDP-reachability check — *not* an end-to-end loss % |
+| Confidence | 0–100 trust score from sample volume, variation, server stability, tab visibility, completion |
+
+From the results it derives a **transparent 0–100 health score** (formula in one
+file, [`src/lib/scoring.ts`](src/lib/scoring.ts)), eight **real-world activity
+grades**, a plain-English diagnosis, and prioritized fixes. Everything is
+inspectable and exportable as JSON.
+
+> NetPulse is **not** tuned to match Ookla, Fast.com, Cloudflare's own test, or
+> M-Lab — they use different servers and methods, so results legitimately
+> differ. The method is documented instead of hidden.
 
 ## Features
 
@@ -78,16 +89,24 @@ plain-English diagnosis, and prioritized fixes.
 - 🔒 Connection & Privacy panel — public IP (masked by default, reveal on
   demand), nearest edge, TLS/HTTP version, WARP detection — presented as
   neutral connection facts, not scare-words
+- 🛰️ Preflight + server selection panel — environment facts and *why* this
+  server was chosen, shown before the numbers
+- 🎯 Result confidence score with a reason breakdown (sample volume, tab
+  visibility, server stability, completion…) so you know how much to trust a run
+- 📤 Methodology & raw-data panel — server candidates, per-run limitations, the
+  full method, and one-click JSON export (raw samples included, public IP never)
 - 🩺 Activity grades and a written diagnosis with a "don't waste money on" callout
 - 🧾 Local test history (stored in your browser, never uploaded)
-- 🪫 Low-data mode — caps a full test from ~240 MB down to ~35 MB for metered connections
+- 🪫 Low-data mode — caps a full test from ~250 MB down to ~40 MB for metered connections
+- 🧪 Unit-tested measurement logic (`npm test`) — see [VALIDATION.md](VALIDATION.md)
 - ♿ Responsive (desktop/tablet/mobile), keyboard-accessible, honors `prefers-reduced-motion`
 
 ## Honest limitations
 
-- **Packet loss isn't shown.** Browsers can't measure it reliably without a
-  special server protocol, so it's deliberately omitted rather than faked. The
-  packet-loss card explains this and points to an OS-level alternative.
+- **Packet loss is experimental.** True end-to-end loss needs a UDP echo server
+  NetPulse doesn't run. Instead the packet-loss card runs a real WebRTC/STUN
+  UDP-reachability check, labels it experimental, and points to an OS-level
+  `ping` for a true loss figure — it never invents a loss percentage.
 - The browser can't read Wi-Fi radio details (SSID, band, signal strength) —
   that would need a native companion app. NetPulse tests the *connection*, not
   the radio.
@@ -97,8 +116,9 @@ plain-English diagnosis, and prioritized fixes.
 - Results depend on the test server (Cloudflare's nearest edge) and your
   device; treat them as a consistent relative baseline, not an absolute truth.
 
-A full audit of the codebase — architecture, measurement sources, what was
-found and fixed, and remaining limitations — lives in [AUDIT.md](AUDIT.md).
+**Docs:** [ENGINE.md](ENGINE.md) (measurement pipeline) ·
+[VALIDATION.md](VALIDATION.md) (test matrix) ·
+[AUDIT.md](AUDIT.md) (codebase honesty audit).
 
 ## Getting started
 
@@ -120,9 +140,16 @@ No API keys, no backend, no account — it runs entirely in the browser.
 
 ## Tech
 
-Vite · React · TypeScript · SVG. Zero runtime dependencies beyond React.
-Measurements use the Cloudflare speed endpoints (`__down` / `__up`), the same
-infrastructure behind [speed.cloudflare.com](https://speed.cloudflare.com).
+Vite · React · TypeScript · SVG · Vitest. Zero runtime dependencies beyond
+React. Throughput/latency use the Cloudflare speed endpoints (`__down` /
+`__up`), the same infrastructure behind
+[speed.cloudflare.com](https://speed.cloudflare.com); the experimental
+packet-loss card uses WebRTC against public STUN servers. Run `npm test` for the
+measurement-logic suite.
+
+The engine is modular under `src/lib/` — `preflight`, `servers`, `latency`,
+`throughput`, `grading`, `packetloss`, `confidence`, `scoring`, `stats`, with
+`engine.ts` sequencing them.
 
 ## Roadmap
 

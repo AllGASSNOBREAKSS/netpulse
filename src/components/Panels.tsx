@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { pingOnce } from "../lib/engine";
+import { maskIp } from "../lib/ip";
 
 /* ============================================================================
    Latency Monitor — real continuous probes, start/stop, live stats.
@@ -104,17 +105,6 @@ function Stat({ label, value, accent }: { label: string; value: string; accent?:
    Public IP is masked by default; reveal is a deliberate user action.
    ============================================================================ */
 type TraceInfo = Record<string, string>;
-
-function maskIp(ip: string): string {
-  if (ip.includes(":")) {
-    // IPv6: keep the first two groups, mask the rest.
-    const groups = ip.split(":");
-    return `${groups[0]}:${groups[1]}:••••:••••`;
-  }
-  const parts = ip.split(".");
-  if (parts.length !== 4) return "•••";
-  return `${parts[0]}.${parts[1]}.•••.•••`;
-}
 
 export function ConnectionPrivacy() {
   const [trace, setTrace] = useState<TraceInfo | null>(null);
