@@ -2,6 +2,8 @@
 
 **An internet health console, not another speed test.**
 
+**Live: [netpulse-psi.vercel.app](https://netpulse-psi.vercel.app)**
+
 Most speed tests hand you three numbers and walk away. NetPulse runs a full
 diagnostic against Cloudflare's public speed endpoints — measuring not just how
 *fast* your connection is, but how it behaves **under load** — then explains in
