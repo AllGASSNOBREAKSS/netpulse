@@ -64,7 +64,7 @@ function meanAbsDelta(xs: number[]): number {
   return sum / (xs.length - 1);
 }
 
-async function pingOnce(): Promise<number | null> {
+export async function pingOnce(): Promise<number | null> {
   const t0 = performance.now();
   try {
     await fetch(`${BASE}/__down?bytes=0`, { cache: "no-store" });

@@ -7,14 +7,16 @@ diagnostic against Cloudflare's public speed endpoints — measuring not just ho
 *fast* your connection is, but how it behaves **under load** — then explains in
 plain English what's good, what's wrong, and what to actually do about it.
 
-The signature is a live dual-trace oscilloscope: cyan throughput and amber
-latency probes drawn in real time as the test runs. The frozen trace *is* your
-result.
+The signature is an automotive instrument cluster: a 270° speedometer whose
+needle is driven by spring physics, revving on live throughput samples like an
+RPM gauge. The red ring badge is your idle ping, the gear indicator shows the
+test phase (`D3` download, `U2` upload, `N` done), and the fuel bar counts the
+real megabytes the test consumed.
 
 ```
-216 Mbps  ▁▂▄▆█████▇▆   ↓ download
- 80 ms    ·····•·••···   ~ latency (rises under load = bufferbloat)
-SCORE 79/100 — Solid all-round connection
+        ⌀ 332 MBPS  [N]        ← needle settles on your measured download
+   (44)              health 79/100
+        ▮▯ ▬▬▬▬▬▬  349 MB     ← data actually moved, byte-counted
 ```
 
 ---
@@ -57,7 +59,13 @@ plain-English diagnosis, and prioritized fixes.
 ## Features
 
 - 📡 Real measurement engine — no fabricated numbers
-- 📈 Live oscilloscope visualization of throughput + latency
+- 🏎️ Animated automotive speedometer — spring-physics needle, auto-scaling dial
+  (240 → 500 → 1000+ Mbps), redline zone, phase "gear" indicator, data-used fuel bar
+- 🧭 Dashboard sidebar: Speed test · Latency monitor · Connections · Vulnerabilities · History
+- 📉 Live latency monitor — continuous 500 ms probes with spike/drop detection,
+  run it while you game or join calls
+- 🕵️ Exposure panel — your public IP, nearest edge, TLS version, and Cloudflare
+  WARP detection, measured live
 - 🩺 Health score, activity grades, and a written diagnosis
 - 🧾 Local test history (stored in your browser, never uploaded)
 - 🪫 Low-data mode — caps a full test from ~240 MB down to ~35 MB for metered connections
@@ -93,7 +101,7 @@ No API keys, no backend, no account — it runs entirely in the browser.
 
 ## Tech
 
-Vite · React · TypeScript · Canvas 2D. Zero runtime dependencies beyond React.
+Vite · React · TypeScript · SVG. Zero runtime dependencies beyond React.
 Measurements use the Cloudflare speed endpoints (`__down` / `__up`), the same
 infrastructure behind [speed.cloudflare.com](https://speed.cloudflare.com).
 
