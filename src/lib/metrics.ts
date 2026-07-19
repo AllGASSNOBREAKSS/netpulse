@@ -51,7 +51,7 @@ export const METRICS: MetricDef[] = [
     sub: (r) =>
       r.download ? `single ${fmt(r.download.single.mbps)} · multi ${fmt(r.download.multi.mbps)} Mbps` : null,
     what: "How much data your connection can pull down per second — the headline number ISPs advertise.",
-    how: "Two runs against the selected server: a single-connection run, then a multi-connection run (up to 4 parallel HTTPS streams; 2 in low-data mode). Each request is cache-busted and no-store. Throughput is sampled every 250 ms; the reported figure is the median of the top half of the multi-connection samples, which ignores TCP slow-start. Runs stop early once samples are steady, or at the duration/data cap.",
+    how: "Two runs against the selected server: a single-connection run, then a multi-connection run (up to 4 parallel HTTPS streams; 2 in low-data mode). Each request is cache-busted and no-store. Throughput uses timed ~250 ms windows plus the final partial window; the reported figure is the median of the top half of the multi-connection samples, which ignores TCP slow-start. Runs stop early once samples are steady, or at the duration/data cap.",
     why: "Determines how fast pages, downloads, streams and updates arrive. The gap between single and multi connection speed hints at whether a single flow is being shaped. Past ~100 Mbps, responsiveness (latency) matters more than raw speed.",
     bands: [
       { range: "≥ 300 Mbps", label: "More than almost any household needs" },
@@ -68,7 +68,7 @@ export const METRICS: MetricDef[] = [
           : "No action needed — this is plenty for everyday use.",
     samples: (r) => {
       const values = mbpsOf(r, DL_PHASES);
-      return values.length ? { values, unit: "Mbps", caption: "250 ms throughput samples (single then multi connection)" } : null;
+      return values.length ? { values, unit: "Mbps", caption: "Timed throughput windows (~250 ms, plus the final partial window; single then multi connection)" } : null;
     },
   },
   {
@@ -78,7 +78,7 @@ export const METRICS: MetricDef[] = [
     value: (r) => (r.uploadMbps !== undefined ? `${fmt(r.uploadMbps)} Mbps` : null),
     sub: (r) => (r.upload ? `peak ${fmt(r.upload.peakMbps)} Mbps` : null),
     what: "How much data your connection can push out per second.",
-    how: "Parallel HTTPS POST streams (3, or 1 in low-data mode) send in-memory random payloads to the server for up to 8 seconds. Sampled every 250 ms; the reported figure is the median of the top half of samples, and peak is the single best window.",
+    how: "Parallel HTTPS POST streams (3, or 1 in low-data mode) send in-memory random payloads to the server for up to 8 seconds. Throughput uses timed ~250 ms windows plus the final partial window; the reported figure is the median of the top half of samples, and peak is the single best window.",
     why: "Video calls, livestreaming, cloud backups and sending files all depend on upload. Many cable plans are heavily asymmetric — a fraction of the download figure.",
     bands: [
       { range: "≥ 50 Mbps", label: "Excellent — streaming and backups without thinking" },
@@ -92,7 +92,7 @@ export const METRICS: MetricDef[] = [
         : "Healthy. If calls still stutter while uploading, look at Upload-loaded latency instead.",
     samples: (r) => {
       const values = mbpsOf(r, ["upload"]);
-      return values.length ? { values, unit: "Mbps", caption: "250 ms throughput samples during the upload phase" } : null;
+      return values.length ? { values, unit: "Mbps", caption: "Timed throughput windows (~250 ms, plus the final partial window) during upload" } : null;
     },
   },
   {
@@ -293,8 +293,8 @@ export const METRICS: MetricDef[] = [
     id: "dataUsed",
     name: "Data transferred",
     value: (r) => (r.dataUsedMB !== undefined ? `${r.dataUsedMB.toFixed(0)} MB` : null),
-    what: "The real amount of data this test moved over your connection.",
-    how: "Counted byte-by-byte from the download streams' readers and the upload bodies actually sent.",
+    what: "The application payload NetPulse observed during this test.",
+    how: "Counted byte-by-byte from download stream readers and from upload bodies after the server accepted each request. Browser APIs do not expose protocol overhead or the portion of an upload aborted mid-request, so this is measured payload, not exact on-wire usage.",
     why: "Speed tests are data-hungry. On metered or capped connections this matters — that's why low-data mode exists.",
     bands: [
       { range: "100–350 MB", label: "Typical full test (scales with your speed)" },

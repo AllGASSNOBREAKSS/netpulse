@@ -9,7 +9,8 @@ app never does).
 ## Running the automated suite
 
 ```bash
-npm test          # vitest run — 25 tests across 5 files
+npm run check     # typecheck + zero-warning lint + tests + production build
+npm test          # vitest run — 31 tests across 6 files
 npm run test:watch
 ```
 
@@ -21,7 +22,8 @@ Test files live in `src/lib/__tests__/`:
 | `grading.test.ts` | bufferbloat A–F boundaries, separate down/up grades, stability steady-vs-spiky |
 | `scoring.test.ts` | weight sum = 100, fast/slow/high-latency/bufferbloat cases, per-component caps |
 | `confidence.test.ts` | foreground vs background, complete vs interrupted, sample volume, errors/server |
-| `servers.test.ts` | ranking by latency+jitter, unavailable→rank 0, IPv4/IPv6 carried through |
+| `servers.test.ts` | ranking by latency+jitter/reachability, intermittent and unavailable candidates, IPv4/IPv6 carried through |
+| `throughput.test.ts` | fast byte-capped final windows, loaded probe retention, HTTP endpoint failure handling, upload final window |
 
 ## Scenario matrix
 
@@ -41,6 +43,8 @@ these tests and never in the production UI.**
 | VPN enabled | Manual — preflight heuristic reports "possible" when timezone ≠ IP country or WARP on |
 | Mobile connection | Manual — `preflight.ts` device-class detection; verified at 375 px viewport |
 | Failed test server | `servers.test.ts` (unavailable → rank 0, not chosen) |
+| Fast byte-capped phase | `throughput.test.ts` (final partial window remains non-zero and retains its overlapping loaded-latency probe) |
+| Throughput HTTP error | `throughput.test.ts` (non-2xx endpoint responses cannot become a 0 Mbps result) |
 | Interrupted test | `confidence.test.ts` (completed=false → sharp drop); engine try/finally cleanup |
 | IPv4 and IPv6 | `servers.test.ts` (family carried through); `preflight.ts` best-effort family probes |
 

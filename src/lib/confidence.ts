@@ -32,10 +32,29 @@ export function computeConfidence(i: ConfidenceInputs): Confidence {
   }
 
   const cov = coefficientOfVariation(i.downloadSamples.slice(Math.floor(dlCount / 2)));
-  if (cov < 0.1) reasons.push({ label: "Result consistency", ok: true, detail: `Steady throughput (CoV ${cov.toFixed(2)})` });
-  else {
+  if (dlCount < 2) {
+    score -= 10;
+    reasons.push({ label: "Result consistency", ok: false, detail: "Too few download samples to assess consistency" });
+  } else if (cov < 0.1) {
+    reasons.push({ label: "Result consistency", ok: true, detail: `Steady throughput (CoV ${cov.toFixed(2)})` });
+  } else {
     score -= cov < 0.25 ? 8 : 18;
     reasons.push({ label: "Result consistency", ok: false, detail: `Variable throughput (CoV ${cov.toFixed(2)})` });
+  }
+
+  if (i.loadedProbeCount >= 6) {
+    reasons.push({ label: "Loaded latency", ok: true, detail: `${i.loadedProbeCount} probes under load` });
+  } else {
+    const penalty = i.loadedProbeCount >= 2 ? 6 : 20;
+    score -= penalty;
+    reasons.push({
+      label: "Loaded latency",
+      ok: false,
+      detail:
+        i.loadedProbeCount === 0
+          ? "No latency probes completed under load"
+          : `Only ${i.loadedProbeCount} latency probe${i.loadedProbeCount === 1 ? "" : "s"} completed under load`,
+    });
   }
 
   if (i.serverAvailable && i.serverJitterMs < 15)

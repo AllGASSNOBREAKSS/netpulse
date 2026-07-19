@@ -165,52 +165,11 @@ export function ConnectionPrivacy() {
         on this page is sent anywhere or stored.
       </p>
 
-      <h2 className="panel__h2">Planned checks (not yet available)</h2>
-      <div className="soon-grid">
-        <Soon title="Password breach check" what="Check whether your email appears in known data breaches — hashed lookups, nothing stored." />
-        <Soon title="Router health" what="Detect router model + firmware age and flag known CVEs. Needs the companion app — browsers can't reach your router." />
-        <Soon title="DNS security" what="Test whether your DNS is encrypted (DoH/DoT) and who actually answers your lookups." />
-        <Soon title="ISP outage radar" what="See whether your provider has reported problems in your area right now." />
-      </div>
-    </div>
-  );
-}
-
-/* ============================================================================
-   Devices — honest: a browser cannot enumerate LAN devices. Explain,
-   and show the plan.
-   ============================================================================ */
-export function Devices() {
-  return (
-    <div className="panel">
-      <h1 className="panel__title">Devices</h1>
-      <p className="panel__sub">Who's on your Wi-Fi, and how much of it they're using.</p>
-
-      <div className="honest">
-        <strong>Straight answer:</strong> a web page is sandboxed — it cannot scan your network,
-        list connected devices, or read router tables. Any website claiming to show "devices on
-        your Wi-Fi" from the browser alone is guessing. This page will light up when the
-        NetPulse companion app ships; until then we'd rather show you nothing than show you
-        fiction.
-      </div>
-
-      <h2 className="panel__h2">What this page will do (planned)</h2>
-      <div className="soon-grid">
-        <Soon title="Device list" what="Every device on your network — phones, TVs, consoles, unknown guests — with names and vendors." />
-        <Soon title="Intruder alert" what="A device you've never seen joins your Wi-Fi → you get a notification." />
-        <Soon title="Per-device usage" what="See which device is eating your bandwidth in real time." />
-        <Soon title="Kick & block" what="One tap to boot a freeloader off your network (router-dependent)." />
-      </div>
-    </div>
-  );
-}
-
-function Soon({ title, what }: { title: string; what: string }) {
-  return (
-    <div className="soon">
-      <div className="soon__badge">planned</div>
-      <div className="soon__title">{title}</div>
-      <div className="soon__what">{what}</div>
+      <p className="panel__note">
+        NetPulse deliberately does not claim to inspect router firmware, enumerate LAN devices,
+        detect password breaches, or verify DNS encryption from this page. Those checks require
+        router access, user-provided account data, or a cooperating diagnostic service.
+      </p>
     </div>
   );
 }

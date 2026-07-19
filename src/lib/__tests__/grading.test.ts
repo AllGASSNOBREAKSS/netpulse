@@ -37,7 +37,7 @@ describe("bufferbloat grading", () => {
 
 describe("stability score", () => {
   it("scores a steady connection high", () => {
-    const steady = Array.from({ length: 30 }, () => 22 + Math.sin(Math.random()));
+    const steady = Array.from({ length: 30 }, (_, i) => 22 + Math.sin(i) * 0.5);
     const s = computeStability(20, steady, 0.03);
     expect(s.score).toBeGreaterThan(85);
     expect(s.spikes).toBe(0);

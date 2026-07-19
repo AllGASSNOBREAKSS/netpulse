@@ -12,7 +12,7 @@
 import { computeConfidence } from "./confidence";
 import { computeBufferbloat, computeStability } from "./grading";
 import { maskIp } from "./ip";
-import { measureIdleLatency, pingOnce } from "./latency";
+import { measureIdleLatency } from "./latency";
 import { runPreflight } from "./preflight";
 import { getServer, selectServer } from "./servers";
 import { summarize } from "./stats";
@@ -22,7 +22,6 @@ import {
   SCHEMA_VERSION,
   type EngineCallbacks,
   type IspLocation,
-  type Phase,
   type Sample,
   type TestConfig,
   type TestResult,
@@ -75,7 +74,6 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
   const P = cfg.lowData ? PROFILES.lowData : PROFILES.full;
   const start = performance.now();
   const samples: Sample[] = [];
-  let errors = 0;
 
   // Track whether the tab stayed foreground for the whole run — it gates
   // confidence, because background tabs throttle timers and depress results.
@@ -109,6 +107,9 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
       push({ phase: "latency", rttMs: rtt }),
     );
     const idleLatency = summarize(idleRtts);
+    if (idleLatency.count === 0) {
+      throw new Error("Idle latency measurement failed: every probe to the test endpoint failed.");
+    }
     cb.onPartial?.({ idleLatency, idlePingMs: idleLatency.median, idleJitterMs: idleLatency.jitter });
 
     /* ---- 4. Download: single connection ---- */
@@ -138,6 +139,9 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
     });
     const loadedDownRtts = [...single.rtts, ...multi.rtts];
     const loadedDown = summarize(loadedDownRtts);
+    if (loadedDown.count === 0) {
+      throw new Error("Download-loaded latency measurement failed: no probe completed while download load was active.");
+    }
     cb.onPartial?.({
       downloadMbps: multi.mbps,
       loadedDown,
@@ -157,6 +161,9 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
       onRtt: (rtt) => push({ phase: "upload", rttMs: rtt }),
     });
     const loadedUp = summarize(upload.rtts);
+    if (loadedUp.count === 0) {
+      throw new Error("Upload-loaded latency measurement failed: no probe completed while upload load was active.");
+    }
     cb.onPartial?.({ uploadMbps: upload.mbps, loadedUp, loadedUpPingMs: loadedUp.median });
 
     /* ---- 6. Packet loss / UDP reachability (experimental) ---- */
@@ -183,6 +190,7 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
     };
 
     const dataUsedMB = (single.bytes + multi.bytes + upload.bytes) / 1_000_000;
+    const requestErrors = single.failedRequests + multi.failedRequests + upload.failedRequests;
 
     const confidence = computeConfidence({
       downloadSamples: multi.samples,
@@ -193,7 +201,7 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
       serverJitterMs: server.chosen.latency.jitter,
       tabForegroundThroughout,
       completed: true,
-      errors,
+      errors: requestErrors,
       earlyStopped: single.earlyStopped || multi.earlyStopped || upload.earlyStopped,
     });
 
@@ -203,6 +211,7 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
       idleFailed,
       packetLossExperimental: true,
       earlyStopped: multi.earlyStopped,
+      requestErrors,
     });
 
     cb.onPhase?.("done");
@@ -247,9 +256,6 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
     };
     cb.onPartial?.(result);
     return result;
-  } catch (e) {
-    errors++;
-    throw e;
   } finally {
     if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVis);
   }
@@ -261,6 +267,7 @@ function buildLimitations(x: {
   idleFailed: number;
   packetLossExperimental: boolean;
   earlyStopped: boolean;
+  requestErrors: number;
 }): string[] {
   const out: string[] = [];
   if (x.packetLossExperimental)
@@ -269,6 +276,8 @@ function buildLimitations(x: {
   if (x.lowData) out.push("Low-data mode caps bytes and duration, so figures rest on fewer samples.");
   if (!x.tabForegroundThroughout) out.push("The tab was backgrounded during the test; browser timer throttling may have depressed throughput and latency.");
   if (x.idleFailed > 0) out.push(`${x.idleFailed} idle latency probe(s) failed.`);
-  if (x.earlyStopped) out.push("A phase stopped early once samples were steady — this is by design and does not reduce accuracy.");
+  if (x.requestErrors > 0) out.push(`${x.requestErrors} throughput request(s) failed; confidence was reduced.`);
+  if (x.earlyStopped)
+    out.push("A phase stopped early once throughput samples were steady; the throughput estimate stabilized, but fewer loaded-latency probes can reduce confidence.");
   return out;
 }

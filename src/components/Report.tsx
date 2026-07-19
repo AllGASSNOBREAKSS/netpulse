@@ -134,7 +134,7 @@ export function MethodologyModal({
             <tr><td className="mi__range">Server</td><td>{result.server.chosen.provider} · {result.server.chosen.city ?? "?"} · {result.server.chosen.protocol}</td></tr>
             <tr><td className="mi__range">Mode</td><td>{result.lowData ? "Low-data" : "Full"}</td></tr>
             <tr><td className="mi__range">IP family</td><td>{result.ispLocation.ipFamily} · {result.ispLocation.ipMasked}</td></tr>
-            <tr><td className="mi__range">Data moved</td><td>{result.dataUsedMB.toFixed(0)} MB in {(result.durationMs / 1000).toFixed(1)} s</td></tr>
+            <tr><td className="mi__range">Payload measured</td><td>{result.dataUsedMB.toFixed(0)} MB in {(result.durationMs / 1000).toFixed(1)} s</td></tr>
             <tr><td className="mi__range">Raw samples</td><td>{result.samples.length} events stored</td></tr>
           </tbody>
         </table>
@@ -148,7 +148,9 @@ export function MethodologyModal({
               <tr key={c.id}>
                 <td className="mi__range">{c.provider}</td>
                 <td>
-                  {c.available ? `${Math.round(c.latency.median)} ms median · rank ${c.rank}` : "unreachable"}
+                  {c.available
+                    ? `${Math.round(c.latency.median)} ms median · ${c.attempted - c.failed}/${c.attempted} probes · rank ${c.rank}`
+                    : `unreachable · 0/${c.attempted} probes`}
                   {c.id === result.server.chosen.id ? " · chosen" : ""}
                 </td>
               </tr>

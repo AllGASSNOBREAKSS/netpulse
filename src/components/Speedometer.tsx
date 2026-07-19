@@ -39,6 +39,7 @@ function dialMax(peak: number): number {
 
 export default function Speedometer({
   liveMbps,
+  peakMbps,
   phase,
   idlePingMs,
   dataUsedMB,
@@ -47,6 +48,7 @@ export default function Speedometer({
   onScoreClick,
 }: {
   liveMbps: number | null;
+  peakMbps: number;
   phase: Phase;
   idlePingMs: number | undefined;
   dataUsedMB: number;
@@ -55,9 +57,7 @@ export default function Speedometer({
   onScoreClick?: () => void;
 }) {
   const [display, setDisplay] = useState(0);
-  const [max, setMax] = useState(240);
   const physics = useRef({ value: 0, velocity: 0, target: 0 });
-  const peakRef = useRef(0);
   const lastTickRef = useRef(0);
 
   const isDownload = phase === "download_single" || phase === "download_multi";
@@ -73,12 +73,7 @@ export default function Speedometer({
     } else {
       p.target = 0; // preflight/server/latency/packetloss: needle rests
     }
-    // Keep the dial scale ahead of whatever the needle is chasing.
-    if (p.target > peakRef.current) {
-      peakRef.current = p.target;
-      setMax(dialMax(peakRef.current));
-    }
-  }, [liveMbps, phase]);
+  }, [isLoading, liveMbps, phase]);
 
   // Watchdog: rAF is throttled or suspended in background tabs. Whenever the
   // spring loop stops ticking, snap the dial straight to its target so it
@@ -94,15 +89,6 @@ export default function Speedometer({
     }, 300);
     return () => clearInterval(watchdog);
   }, []);
-
-  // Reset between runs — the first phase of any run is preflight.
-  useEffect(() => {
-    if (phase === "preflight") {
-      peakRef.current = 0;
-      setMax(240);
-      physics.current.target = 0;
-    }
-  }, [phase]);
 
   // Spring loop — stiff enough to chase samples, soft enough to overshoot
   // like a rev counter.
@@ -130,6 +116,7 @@ export default function Speedometer({
     return () => cancelAnimationFrame(raf);
   }, []);
 
+  const max = dialMax(peakMbps);
   const frac = Math.min(display / max, 1);
   const needleDeg = START_DEG + frac * SWEEP_DEG;
   const [nx1, ny1] = polar(needleDeg, R_ARC - 30);
@@ -235,8 +222,8 @@ export default function Speedometer({
         )}
       </div>
 
-      {/* data-used fuel bar */}
-      <div className="speedo__fuel" title="Data used by this test">
+      {/* measured-payload fuel bar */}
+      <div className="speedo__fuel" title="Application payload measured by this test">
         <span className="speedo__fuel-icon">▮▯</span>
         <span className="speedo__fuel-track">
           <span className="speedo__fuel-fill" style={{ width: `${Math.max(dataFrac * 100, 2)}%` }} />

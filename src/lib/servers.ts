@@ -42,17 +42,6 @@ export function getServer(id: string | undefined): ServerCandidate {
   return SERVERS.find((s) => s.id === id) ?? SERVERS[0];
 }
 
-/** Approximate great-circle distance in km. */
-function haversineKm(a: [number, number], b: [number, number]): number {
-  const R = 6371;
-  const dLat = ((b[0] - a[0]) * Math.PI) / 180;
-  const dLon = ((b[1] - a[1]) * Math.PI) / 180;
-  const lat1 = (a[0] * Math.PI) / 180;
-  const lat2 = (b[0] * Math.PI) / 180;
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
-  return Math.round(2 * R * Math.asin(Math.sqrt(h)));
-}
-
 async function pingServer(c: ServerCandidate): Promise<number | null> {
   const t0 = performance.now();
   try {
@@ -99,13 +88,10 @@ async function probeCandidate(c: ServerCandidate, samples: number): Promise<Serv
   const ip = trace?.ip ?? "";
   const ipFamily: ServerProbe["ipFamily"] = ip.includes(":") ? "IPv6" : ip ? "IPv4" : "unknown";
 
-  // Colo distance: Cloudflare exposes the serving colo code but not its coords
-  // over CORS, so distance stays null unless a geo hint is present. We never
-  // fabricate a number.
-  const approxDistanceKm =
-    trace?.loc && trace.colo && COLO_COORDS[trace.colo]
-      ? haversineKm(parseLoc(trace.loc) ?? COLO_COORDS[trace.colo], COLO_COORDS[trace.colo])
-      : null;
+  // Cloudflare exposes the serving colo code and the client's country code,
+  // but not client coordinates. A meaningful client-to-edge distance cannot
+  // be derived from those facts alone, so it remains unavailable.
+  const approxDistanceKm = null;
 
   return {
     id: c.id,
@@ -118,38 +104,18 @@ async function probeCandidate(c: ServerCandidate, samples: number): Promise<Serv
     ipFamily,
     latency,
     available: rtts.length > 0,
+    attempted: samples,
+    failed,
+    availability: samples > 0 ? rtts.length / samples : 0,
     rank: 0,
   };
 }
 
-function parseLoc(loc: string): [number, number] | null {
-  // Cloudflare `loc` is a country code, not coordinates — no parse possible.
-  void loc;
-  return null;
-}
-
-/** A tiny sampling of Cloudflare colo coordinates for distance estimates. */
-const COLO_COORDS: Record<string, [number, number]> = {
-  IAD: [38.94, -77.46],
-  EWR: [40.69, -74.17],
-  LAX: [33.94, -118.4],
-  SJC: [37.36, -121.93],
-  ORD: [41.97, -87.9],
-  DFW: [32.9, -97.04],
-  ATL: [33.64, -84.43],
-  MIA: [25.8, -80.28],
-  LHR: [51.47, -0.46],
-  CDG: [49.0, 2.55],
-  FRA: [50.03, 8.56],
-  AMS: [52.31, 4.76],
-  SIN: [1.36, 103.99],
-  NRT: [35.77, 140.39],
-  SYD: [-33.95, 151.18],
-};
-
 /**
- * Rank = availability × latency × consistency. Lower median latency and lower
- * jitter rank higher; unavailable servers rank 0.
+ * Rank = reachability × latency × consistency. Lower median latency, lower
+ * jitter, and a higher successful-probe ratio rank higher; unavailable servers
+ * rank 0. This prevents a candidate with one lucky success from outranking a
+ * consistently reachable server.
  */
 export function rankProbes(probes: ServerProbe[]): ServerProbe[] {
   const avail = probes.filter((p) => p.available);
@@ -159,7 +125,8 @@ export function rankProbes(probes: ServerProbe[]): ServerProbe[] {
       if (!p.available) return { ...p, rank: 0 };
       const latScore = bestMed / Math.max(p.latency.median, 1); // 1.0 for the fastest
       const jitScore = 1 / (1 + p.latency.jitter / 10);
-      return { ...p, rank: Math.round(latScore * 0.7 * 100 + jitScore * 0.3 * 100) / 100 };
+      const reachability = Math.max(0, Math.min(1, p.availability));
+      return { ...p, rank: Math.round((latScore * 0.7 + jitScore * 0.3) * reachability * 100) / 100 };
     })
     .sort((a, b) => b.rank - a.rank);
 }

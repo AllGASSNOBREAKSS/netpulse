@@ -22,9 +22,9 @@ function detectBrowser(ua: string): string {
 function detectOS(ua: string): string {
   if (/Windows NT 10/.test(ua)) return "Windows 10/11";
   if (/Windows/.test(ua)) return "Windows";
-  if (/Mac OS X/.test(ua)) return "macOS";
   if (/Android/.test(ua)) return "Android";
   if (/(iPhone|iPad|iPod)/.test(ua)) return "iOS/iPadOS";
+  if (/Mac OS X/.test(ua)) return "macOS";
   if (/Linux/.test(ua)) return "Linux";
   return "Unknown OS";
 }
@@ -42,14 +42,18 @@ function detectDeviceClass(): Preflight["deviceClass"] {
 
 /** Best-effort reachability of one IP family via an opaque no-cors fetch. */
 async function familyReachable(url: string, timeoutMs = 3500): Promise<TriState> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     await fetch(url, { mode: "no-cors", cache: "no-store", signal: ctrl.signal });
-    clearTimeout(timer);
     return "yes"; // opaque response still resolves on successful connect
   } catch {
-    return "no"; // network error or blocked — reported as best-effort "no"
+    // A browser cannot distinguish an unavailable IP family from a blocked
+    // cross-origin request, privacy extension, or local policy. "unknown" is
+    // more accurate than asserting that the network has no connectivity.
+    return "unknown";
+  } finally {
+    clearTimeout(timer);
   }
 }
 

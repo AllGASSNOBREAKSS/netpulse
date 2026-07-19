@@ -19,8 +19,8 @@ Each stage is a separate module under `src/lib/`. The orchestrator
 | 1 | Preflight | `preflight.ts` | Browser, OS, device class, tab foreground state, secure context, IPv4/IPv6 availability, connection type, **possible** VPN/proxy (heuristic), estimated duration + data |
 | 2 | Server selection | `servers.ts` | Probes each registered candidate (latency samples + trace), ranks by median latency + jitter + availability, picks the best (or a manual choice) and explains why |
 | 3 | Idle latency | `latency.ts` | 14 (10 low-data) zero-byte probes, `performance.now()` timed → min / median / mean / p95 / p99 / jitter / stddev / failed / count |
-| 4 | Download | `throughput.ts` | **Single-connection** then **multi-connection** run; cache-busted, no-store; 250 ms rolling samples; representative = top-half median; peak; CoV; bytes; early-stop on steadiness; duration/data caps |
-| 5 | Upload | `throughput.ts` | Parallel POST of in-memory random payloads; reliable + peak throughput; consistency; bytes |
+| 4 | Download | `throughput.ts` | **Single-connection** then **multi-connection** run; cache-busted, no-store; timed ~250 ms windows plus a final partial window; representative = top-half median; peak; CoV; payload bytes; early-stop on steadiness; duration/data caps |
+| 5 | Upload | `throughput.ts` | Parallel POST of in-memory random payloads; reliable + peak throughput; consistency; accepted payload bytes |
 | 6 | Loaded latency | `throughput.ts` | Continuous probes **during** download and upload, kept separate |
 | 7 | Packet loss | `packetloss.ts` | **Experimental** WebRTC/STUN UDP-reachability check (see below) — not an end-to-end loss % |
 | 8 | Bufferbloat | `grading.ts` | Loaded − idle latency rise, **separate** for download and upload, graded A–F |
@@ -47,7 +47,7 @@ read slightly higher than raw ICMP ping because they include TLS/HTTP framing.
 - **Early stopping**: once the recent samples' coefficient of variation drops
   below 5% (after a minimum duration and ≥12 samples), the phase stops. This
   saves data without hurting accuracy, and is disclosed in the result.
-- **Caps**: every phase has a hard duration cap and a hard byte cap.
+- **Caps**: every phase has a hard duration cap and a payload target. In-flight parallel requests can overshoot the payload target slightly, and browser APIs cannot expose request framing or partially sent aborted uploads, so the displayed data figure is measured application payload rather than exact on-wire usage.
 
 ## Packet loss — why it's experimental
 

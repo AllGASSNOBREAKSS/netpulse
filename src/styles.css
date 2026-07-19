@@ -157,6 +157,7 @@ html, body {
   padding: 26px clamp(16px, 3.5vw, 44px) 56px;
   max-width: 1020px;
   width: 100%;
+  min-width: 0;
   margin: 0 auto;
 }
 
@@ -174,7 +175,8 @@ html, body {
 
 .speedo {
   position: relative;
-  width: min(430px, 90vw);
+  width: 100%;
+  max-width: 430px;
 }
 .speedo__dial { display: block; width: 100%; height: auto; }
 
@@ -722,35 +724,6 @@ html, body {
 .lat-bar--spike { background: var(--amber); }
 .lat-bar--fail { background: var(--red); }
 .lat-empty { font-family: var(--mono); font-size: 11.5px; color: var(--muted); align-self: center; margin: 0 auto; }
-
-.honest {
-  margin-top: 22px;
-  border: 1px solid rgba(255, 180, 84, 0.35);
-  background: rgba(255, 180, 84, 0.06);
-  border-radius: 12px;
-  padding: 16px 18px;
-  font-size: 14px;
-  line-height: 1.6;
-  max-width: 62ch;
-}
-.honest strong { color: var(--amber); }
-
-.soon-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
-.soon { border: 1px dashed var(--line); border-radius: 12px; padding: 16px; background: rgba(255, 255, 255, 0.015); }
-.soon__badge {
-  display: inline-block;
-  font-family: var(--mono);
-  font-size: 9px;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--blue);
-  border: 1px solid rgba(96, 165, 250, 0.4);
-  border-radius: 999px;
-  padding: 2px 9px;
-  margin-bottom: 10px;
-}
-.soon__title { font-weight: 600; font-size: 14.5px; }
-.soon__what { margin-top: 4px; font-size: 13px; color: var(--muted); line-height: 1.55; }
 
 /* ================= History table ================= */
 .history__clear {

@@ -64,6 +64,10 @@ export type ServerProbe = {
   ipFamily: "IPv4" | "IPv6" | "unknown";
   latency: Summary;
   available: boolean;
+  attempted: number;
+  failed: number;
+  /** Successful latency probes divided by attempts (0–1). */
+  availability: number;
   /** 0–1 relative ranking score (higher is better). */
   rank: number;
 };
@@ -85,6 +89,8 @@ export type ThroughputStats = {
   bytes: number;
   durationMs: number;
   earlyStopped: boolean;
+  /** Requests that failed before the phase completed. */
+  failedRequests: number;
 };
 
 /* ---- Bufferbloat ---------------------------------------------------------- */
@@ -146,7 +152,6 @@ export type Confidence = {
 export type TestConfig = {
   lowData: boolean;
   serverId?: string; // manual server pick
-  forceIpFamily?: "auto" | "v4" | "v6";
 };
 
 /* ---- Full result ---------------------------------------------------------- */

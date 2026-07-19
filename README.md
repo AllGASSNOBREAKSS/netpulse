@@ -13,7 +13,7 @@ The signature is an automotive instrument cluster: a 270° speedometer whose
 needle is driven by spring physics, revving on live throughput samples like an
 RPM gauge. The red ring badge is your idle ping, the gear indicator shows the
 test phase (`D3` download, `U2` upload, `N` done), and the fuel bar counts the
-real megabytes the test consumed.
+application payload the browser can observe (not protocol overhead).
 
 ```
         ⌀ 332 MBPS  [N]        ← needle settles on your measured download
@@ -52,7 +52,7 @@ A staged pipeline — full detail in **[ENGINE.md](ENGINE.md)**:
 | Preflight | Browser, OS, device, tab state, IPv4/IPv6 availability, secure context, **possible** VPN/proxy (heuristic), estimated duration + data |
 | Server selection | Probes candidates, ranks by median latency + jitter + availability, explains the pick |
 | Idle latency | Timed zero-byte probes (`performance.now()`) → min / median / mean / **P95 / P99** / jitter |
-| Download | **Single- then multi-connection**, cache-busted, no-store, rolling samples, early-stop on steadiness, duration/data caps; top-half median |
+| Download | **Single- then multi-connection**, cache-busted, no-store, timed windows (including the final partial window), early-stop on steadiness, duration/data caps; top-half median |
 | Upload | Parallel POST of in-memory random payloads; reliable + **peak** throughput |
 | Loaded latency | Probed *while saturating* download, then upload — kept **separate** |
 | Bufferbloat | Loaded − idle rise, **separate download/upload grades A–F** |
@@ -75,15 +75,15 @@ inspectable and exportable as JSON.
   from measurements; anything that can't be measured says so (see packet loss)
 - 🏎️ Animated automotive speedometer — spring-physics needle, auto-scaling dial
   (240 → 500 → 1000+ Mbps), redline zone, phase "gear" indicator showing the
-  stream count that actually ran, data-used fuel bar
+  stream count that actually ran, measured-payload fuel bar
 - 🔍 Interactive metric cards — click any of the 11 metrics for what it means,
   how it was measured, your result, healthy ranges, raw samples, and a
   recommended next action
 - 🧮 Transparent health score — the formula lives in one documented file
   ([`src/lib/scoring.ts`](src/lib/scoring.ts)); click the score for a full
   per-component breakdown with weights
-- 🧭 Collapsible dashboard sidebar: Speed test · Latency monitor · Devices ·
-  Connection & Privacy · History
+- 🧭 Collapsible dashboard sidebar: Speed test · Latency monitor · Connection &
+  Privacy · History
 - 📉 Live latency monitor — continuous 500 ms probes with spike/drop detection,
   run it while you game or join calls
 - 🔒 Connection & Privacy panel — public IP (masked by default, reveal on
@@ -132,6 +132,7 @@ npm run dev        # http://localhost:5178
 Build for production:
 
 ```bash
+npm run check      # typecheck + lint + unit tests + production build
 npm run build      # outputs to dist/
 npm run preview
 ```

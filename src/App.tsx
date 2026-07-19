@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import Speedometer from "./components/Speedometer";
-import { ConnectionPrivacy, Devices, LatencyMonitor } from "./components/Panels";
+import { ConnectionPrivacy, LatencyMonitor } from "./components/Panels";
 import { MetricDetail, ScoreDetail } from "./components/MetricDetail";
 import { ConfidencePanel, MethodologyModal, PreflightServer } from "./components/Report";
 import { runTest, type Phase, type TestResult } from "./lib/engine";
@@ -25,20 +25,39 @@ const SIDEBAR_KEY = "netpulse_sidebar";
 
 function loadHistory(): HistoryEntry[] {
   try {
-    return JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "[]");
-  } catch {
+    const parsed: unknown = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "[]");
+    return Array.isArray(parsed) ? parsed.filter(isHistoryEntry).slice(0, 50) : [];
+  } catch (error) {
+    console.warn("NetPulse could not read local test history.", error);
     return [];
   }
+}
+
+function isHistoryEntry(value: unknown): value is HistoryEntry {
+  if (!value || typeof value !== "object") return false;
+  const entry = value as Record<string, unknown>;
+  return (
+    typeof entry.ts === "number" &&
+    typeof entry.down === "number" &&
+    typeof entry.up === "number" &&
+    typeof entry.ping === "number" &&
+    typeof entry.bloat === "number" &&
+    typeof entry.grade === "string" &&
+    typeof entry.score === "number" &&
+    typeof entry.dataMB === "number"
+  );
 }
 
 function saveHistory(entries: HistoryEntry[]) {
   try {
     localStorage.setItem(HISTORY_KEY, JSON.stringify(entries.slice(0, 50)));
-  } catch {}
+  } catch (error) {
+    console.warn("NetPulse could not save local test history.", error);
+  }
 }
 
 /* ---- Navigation ------------------------------------------------------------ */
-type View = "speed" | "latency" | "devices" | "privacy" | "history";
+type View = "speed" | "latency" | "privacy" | "history";
 
 const NAV: { view: View; label: string; icon: JSX.Element }[] = [
   {
@@ -57,16 +76,6 @@ const NAV: { view: View; label: string; icon: JSX.Element }[] = [
     icon: (
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
         <path d="M1.5 8h3l2-4 3 8 2-4h3" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    ),
-  },
-  {
-    view: "devices",
-    label: "Devices",
-    icon: (
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-        <circle cx="8" cy="12.5" r="1.2" fill="currentColor" stroke="none" />
-        <path d="M4.5 9.5a5 5 0 0 1 7 0M2 7a8.5 8.5 0 0 1 12 0" strokeLinecap="round" />
       </svg>
     ),
   },
@@ -115,12 +124,14 @@ export default function App() {
   const [history, setHistory] = useState<HistoryEntry[]>(loadHistory);
   const [lowData, setLowData] = useState(false);
   const [liveMbps, setLiveMbps] = useState<number | null>(null);
+  const [peakMbps, setPeakMbps] = useState(0);
   const [dataMB, setDataMB] = useState(0);
   const [openMetric, setOpenMetric] = useState<string | null>(null);
   const [showScore, setShowScore] = useState(false);
   const [showMethod, setShowMethod] = useState(false);
   const [preflight, setPreflight] = useState<Preflight | null>(null);
   const [server, setServer] = useState<ServerSelection | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const runningRef = useRef(false);
   const dataRef = useRef(0);
 
@@ -130,7 +141,9 @@ export default function App() {
     setCollapsed((c) => {
       try {
         localStorage.setItem(SIDEBAR_KEY, c ? "0" : "1");
-      } catch {}
+      } catch (error) {
+        console.warn("NetPulse could not save the sidebar preference.", error);
+      }
       return !c;
     });
   }, []);
@@ -142,8 +155,10 @@ export default function App() {
     setResult(null);
     setVerdict(null);
     setLiveMbps(null);
+    setPeakMbps(0);
     setPreflight(null);
     setServer(null);
+    setErrorMessage(null);
     dataRef.current = 0;
     setDataMB(0);
     try {
@@ -156,7 +171,9 @@ export default function App() {
           onSample: (s) => {
             if (s.mbps !== undefined) {
               setLiveMbps(s.mbps);
-              // each throughput sample covers a 250ms window → Mbps/32 = MB moved
+              setPeakMbps((peak) => Math.max(peak, s.mbps ?? 0));
+              // Live estimate only; the engine replaces it with measured
+              // payload bytes when the run finishes. Most windows are ~250 ms.
               dataRef.current += s.mbps / 32;
               setDataMB(dataRef.current);
             }
@@ -166,7 +183,7 @@ export default function App() {
       );
       setResult(r);
       setLiveMbps(r.downloadMbps); // needle settles on the download result
-      setDataMB(r.dataUsedMB); // exact byte count from the engine
+      setDataMB(r.dataUsedMB); // measured application payload from the engine
       const v = judge(r);
       setVerdict(v);
       const entry: HistoryEntry = {
@@ -184,7 +201,9 @@ export default function App() {
         saveHistory(next);
         return next;
       });
-    } catch {
+    } catch (error) {
+      console.error("NetPulse measurement failed.", error);
+      setErrorMessage(toRunErrorMessage(error));
       setPhase("error");
     } finally {
       runningRef.current = false;
@@ -229,17 +248,17 @@ export default function App() {
             <NavItem key={n.view} item={n} active={view === n.view} onSelect={setView} />
           ))}
           <div className="nav__label">Network</div>
-          {NAV.slice(2, 4).map((n) => (
+          {NAV.slice(2, 3).map((n) => (
             <NavItem key={n.view} item={n} active={view === n.view} onSelect={setView} />
           ))}
           <div className="nav__label">Records</div>
-          {NAV.slice(4).map((n) => (
+          {NAV.slice(3).map((n) => (
             <NavItem key={n.view} item={n} active={view === n.view} onSelect={setView} />
           ))}
         </nav>
 
         <div className="sidebar__foot">
-          <label className="lowdata" title="Cap the test at ~35 MB for metered connections">
+          <label className="lowdata" title="Cap the test at roughly 40 MB for metered connections">
             <input
               type="checkbox"
               checked={lowData}
@@ -251,7 +270,7 @@ export default function App() {
           <div className="sidebar__note">
             Full test moves ~100–400&nbsp;MB.
             <br />
-            Low-data caps it at ~35&nbsp;MB.
+            Low-data targets ~40&nbsp;MB.
           </div>
         </div>
       </aside>
@@ -263,6 +282,7 @@ export default function App() {
             <section className="stage">
               <Speedometer
                 liveMbps={liveMbps}
+                peakMbps={peakMbps}
                 phase={phase}
                 idlePingMs={live.idlePingMs}
                 dataUsedMB={dataMB}
@@ -272,7 +292,7 @@ export default function App() {
               />
               <div className="stage__status" role="status">
                 {running && <span className="pulse-dot" aria-hidden="true" />}
-                {PHASE_LABEL[phase]}
+                {phase === "error" && errorMessage ? errorMessage : PHASE_LABEL[phase]}
                 {result && verdict && <strong> — {verdict.headline}</strong>}
               </div>
               <button className="runbtn" onClick={() => void start()} disabled={running}>
@@ -381,7 +401,6 @@ export default function App() {
         )}
 
         {view === "latency" && <LatencyMonitor />}
-        {view === "devices" && <Devices />}
         {view === "privacy" && <ConnectionPrivacy />}
 
         {view === "history" && (
@@ -454,6 +473,11 @@ export default function App() {
       )}
     </div>
   );
+}
+
+function toRunErrorMessage(error: unknown): string {
+  const detail = error instanceof Error ? error.message : "The measurement pipeline stopped unexpectedly.";
+  return `Test failed — ${detail} Check your connection and retry.`;
 }
 
 function NavItem({
