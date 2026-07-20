@@ -97,7 +97,7 @@ export function HistoryPage({
     <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="font-display text-2xl font-extrabold italic">Test History</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Test History</h1>
           <p className="text-sm text-muted-foreground">Saved locally on this device — nothing is uploaded.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">

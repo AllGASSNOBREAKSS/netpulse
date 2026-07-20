@@ -3,7 +3,10 @@
    gauge card. Accent: cluster blue #60a5fa / #1d4ed8, redline #ef4444,
    fuel green #4ade80. */
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
+/* No universal reset here: Tailwind v4 Preflight already resets margin/padding
+   and box-sizing inside @layer base. An unlayered `* { margin: 0 }` would
+   override every Tailwind margin utility (incl. mx-auto) because unlayered CSS
+   beats layered CSS — which previously left wide layouts pinned to the left. */
 
 /* Design tokens live in src/index.css (light + dark). Legacy aliases:
    --console --rail --panel --line --blue --red --green --amber --text --np-muted
@@ -206,7 +209,7 @@ html, body {
   text-transform: uppercase;
   color: var(--np-muted);
 }
-.conf__score { font-family: var(--cluster); font-style: italic; font-weight: 800; font-size: 30px; line-height: 1; }
+.conf__score { font-family: var(--cluster); font-weight: 800; font-size: 28px; line-height: 1; }
 .conf__score--good { color: var(--green); }
 .conf__score--fair { color: var(--amber); }
 .conf__score--poor { color: var(--red); }
@@ -283,7 +286,7 @@ html, body {
   border-bottom: 1px solid var(--line);
   margin-bottom: 14px;
 }
-.modal__title { font-family: var(--cluster); font-style: italic; font-weight: 800; font-size: 21px; }
+.modal__title { font-weight: 700; font-size: 19px; letter-spacing: -0.01em; }
 .modal__close {
   background: none;
   border: 1px solid var(--line);
@@ -430,7 +433,7 @@ html, body {
 /* ================= Panels ================= */
 .panel { max-width: 860px; }
 .panel__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
-.panel__title { font-family: var(--cluster); font-style: italic; font-weight: 800; font-size: 26px; letter-spacing: -0.01em; }
+.panel__title { font-weight: 700; font-size: 24px; letter-spacing: -0.02em; }
 .panel__sub { margin-top: 6px; color: var(--np-muted); font-size: 14px; max-width: 58ch; }
 .panel__h2 {
   font-family: var(--mono);
@@ -443,7 +446,7 @@ html, body {
 .panel__note { margin-top: 16px; font-size: 13px; color: var(--np-muted); max-width: 60ch; }
 
 .stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 22px; }
-.stat { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 12px 14px; min-width: 0; }
+.stat { border-radius: 10px; background: color-mix(in oklab, var(--secondary) 70%, transparent); padding: 12px 14px; min-width: 0; }
 .stat__label {
   font-family: var(--mono);
   font-size: 9.5px;

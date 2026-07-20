@@ -69,7 +69,7 @@ export function AboutPage() {
 
       <main className="mx-auto max-w-3xl space-y-6 px-5 py-10">
         <div className="space-y-2">
-          <h1 className="font-display text-3xl font-extrabold italic">About NetPulse</h1>
+          <h1 className="text-3xl font-bold tracking-tight">About NetPulse</h1>
           <p className="text-muted-foreground">Understand your internet beyond speed.</p>
         </div>
 

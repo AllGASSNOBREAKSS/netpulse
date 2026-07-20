@@ -145,7 +145,7 @@ export default function App() {
   const speedPage = (
     <div className="space-y-6">
       <div className="text-center">
-        <h1 className="font-display text-2xl font-extrabold italic sm:text-3xl">Speed Test</h1>
+        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Speed Test</h1>
         <p className="mx-auto mt-1 max-w-xl text-sm text-muted-foreground">
           Measure performance, expose instability, and understand what affects your connection —
           every number below is measured live, never simulated.
@@ -225,20 +225,14 @@ export default function App() {
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {(
               [
-                ["Internet provider", result.ispLocation.ispHint ?? "unknown", false],
-                ["Masked IP", result.ispLocation.ipMasked, true],
-                [
-                  "Approx. location",
-                  result.ispLocation.city
-                    ? `${result.ispLocation.city}, ${result.ispLocation.region ?? ""}`.replace(/, $/, "")
-                    : "unknown",
-                  false,
-                ],
-                ["Idle latency", `${Math.round(result.idlePingMs)} ms`, true],
                 ["Download", `${result.downloadMbps >= 100 ? Math.round(result.downloadMbps) : result.downloadMbps.toFixed(1)} Mbps`, true],
                 ["Upload", `${result.uploadMbps >= 100 ? Math.round(result.uploadMbps) : result.uploadMbps.toFixed(1)} Mbps`, true],
-                ["Test server", `${result.server.chosen.provider}${result.server.chosen.edgeCode ? ` · edge ${result.server.chosen.edgeCode}` : ""}`, false],
+                ["Idle latency", `${Math.round(result.idlePingMs)} ms`, true],
+                ["Jitter", `${result.idleJitterMs.toFixed(1)} ms`, true],
+                ["Loaded latency", `${Math.round(Math.max(result.loadedDownPingMs, result.loadedUpPingMs))} ms`, true],
                 ["Bufferbloat", `grade ${result.bufferbloatGrade}`, true],
+                ["Test server", `${result.server.chosen.provider}${result.server.chosen.edgeCode ? ` · edge ${result.server.chosen.edgeCode}` : ""}`, false],
+                ["Masked IP", result.ispLocation.ipMasked, true],
               ] as [string, string, boolean][]
             ).map(([k, v, mono]) => (
               <Card key={k} className="py-3">
@@ -266,7 +260,7 @@ export default function App() {
     <SidebarProvider>
       <AppSidebar view={view} onNavigate={setView} lowData={lowData} onLowData={setLowData} testing={running} />
       <SidebarInset className="min-w-0">
-        <AppHeader testing={running} />
+        <AppHeader />
         <main id="main" className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6">
           <Suspense fallback={<div className="py-16 text-center text-sm text-muted-foreground">Loading…</div>}>
           {view === "speed" && speedPage}

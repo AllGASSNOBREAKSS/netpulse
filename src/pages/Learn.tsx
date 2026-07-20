@@ -154,7 +154,7 @@ export function GuidesPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="font-display text-2xl font-extrabold italic">Guides</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Guides</h1>
         <p className="text-sm text-muted-foreground">
           Practical, no-nonsense explanations — written for humans, grounded in how networks actually behave.
         </p>
@@ -225,7 +225,7 @@ export function FaqPage() {
   return (
     <div className="mx-auto max-w-3xl space-y-5">
       <div>
-        <h1 className="font-display text-2xl font-extrabold italic">FAQ</h1>
+        <h1 className="text-2xl font-bold tracking-tight">FAQ</h1>
         <p className="text-sm text-muted-foreground">Straight answers about speed, latency, and what actually fixes things.</p>
       </div>
       <div className="relative">
@@ -343,7 +343,7 @@ export function CalculatorPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-display text-2xl font-extrabold italic">How Much Speed Do I Need?</h1>
+        <h1 className="text-2xl font-bold tracking-tight">How Much Speed Do I Need?</h1>
         <p className="max-w-2xl text-sm text-muted-foreground">
           Answer honestly for a *concurrent worst hour*, not the whole day. The recommendation uses
           published per-activity bitrates plus 40% headroom — no marketing inflation.

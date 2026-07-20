@@ -44,7 +44,7 @@ export function ResultsPage({
     return (
       <Card className="mx-auto mt-8 max-w-lg text-center">
         <CardHeader>
-          <CardTitle className="font-display italic">Complete Analysis</CardTitle>
+          <CardTitle>Complete Analysis</CardTitle>
           <CardDescription>
             No completed test in this session yet. Run a speed test first — every chart and card
             here is built from measured samples, never simulated.
@@ -82,7 +82,7 @@ export function ResultsPage({
     <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="font-display text-2xl font-extrabold italic">Complete Analysis</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Complete Analysis</h1>
           <p className="text-sm text-muted-foreground">
             {new Date(result.timestamp).toLocaleString()} · {result.server.chosen.provider}{" "}
             {result.server.chosen.edgeCode ?? ""} · {result.dataUsedMB.toFixed(0)} MB measured
