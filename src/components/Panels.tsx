@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { pingOnce } from "../lib/engine";
 import { maskIp } from "../lib/ip";
+import { coloDistanceKm, fetchMeta, type NetworkMeta } from "../lib/servers";
 
 /* ============================================================================
    Latency Monitor — real continuous probes, start/stop, live stats.
@@ -108,12 +109,13 @@ type TraceInfo = Record<string, string>;
 
 export function ConnectionPrivacy() {
   const [trace, setTrace] = useState<TraceInfo | null>(null);
+  const [meta, setMeta] = useState<NetworkMeta | null>(null);
   const [failed, setFailed] = useState(false);
   const [revealIp, setRevealIp] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    fetch("https://speed.cloudflare.com/cdn-cgi/trace")
+    const traceP = fetch("https://speed.cloudflare.com/cdn-cgi/trace")
       .then((r) => r.text())
       .then((t) => {
         if (cancelled) return;
@@ -123,46 +125,63 @@ export function ConnectionPrivacy() {
           if (k && v) info[k] = v;
         }
         setTrace(info);
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
       });
+    void fetchMeta(undefined).then((m) => {
+      if (!cancelled) setMeta(m);
+    });
+    traceP.catch(() => {
+      if (!cancelled) setFailed(true);
+    });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const ipDisplay = trace?.ip ? (revealIp ? trace.ip : maskIp(trace.ip)) : failed ? "unavailable" : "…";
+  const rawIp = meta?.clientIp || trace?.ip || "";
+  const ipDisplay = rawIp ? (revealIp ? rawIp : maskIp(rawIp)) : failed ? "unavailable" : "…";
+  const dist = coloDistanceKm(meta);
 
   return (
     <div className="panel">
       <h1 className="panel__title">Connection &amp; Privacy</h1>
       <p className="panel__sub">
-        What the outside world can see about your connection right now — read live from the
-        test server's echo of your request. These are normal properties of every internet
+        What the outside world can see about your connection right now — read live from
+        Cloudflare's edge view of your request. These are normal properties of every internet
         connection, <strong>not</strong> vulnerabilities.
       </p>
 
+      <h2 className="panel__h2">Your connection</h2>
       <div className="stat-row">
         <div className="stat">
           <div className="stat__label">public IP</div>
           <div className="stat__value">{ipDisplay}</div>
-          {trace?.ip && (
+          {rawIp && (
             <button className="stat__reveal" onClick={() => setRevealIp((v) => !v)}>
               {revealIp ? "mask" : "reveal"}
             </button>
           )}
         </div>
-        <Stat label="nearest edge" value={trace?.colo ?? (failed ? "—" : "…")} />
+        <Stat label="ISP" value={meta?.org ?? (failed ? "—" : "…")} />
+        <Stat label="ASN" value={meta?.asn != null ? `AS${meta.asn}` : failed ? "—" : "…"} />
+        <Stat label="your location" value={meta?.city ? `${meta.city}, ${meta.region ?? ""}`.replace(/, $/, "") : "…"} />
+        <Stat label="IP version" value={meta?.ipFamily ?? "…"} />
+      </div>
+
+      <h2 className="panel__h2">Test server &amp; route</h2>
+      <div className="stat-row">
+        <Stat label="edge (colo)" value={meta?.coloCity ? `${meta.coloCity} (${meta.colo})` : trace?.colo ?? "…"} />
+        <Stat label="distance" value={dist != null ? `~${dist} km` : "—"} />
         <Stat label="TLS" value={trace?.tls ?? (failed ? "—" : "…")} />
         <Stat label="HTTP" value={trace?.http ?? (failed ? "—" : "…")} />
         <Stat label="Cloudflare WARP" value={trace ? (trace.warp === "on" ? "on" : "off") : failed ? "—" : "…"} />
       </div>
 
       <p className="panel__note">
-        Every site you visit sees your public IP — that's how the internet routes replies.
-        NetPulse masks it by default so a screenshot or screen-share doesn't leak it; nothing
-        on this page is sent anywhere or stored.
+        ISP, ASN and location come from Cloudflare's edge (`/meta`) — the same source
+        speed.cloudflare.com uses. Location is approximate and reflects your network's routing
+        region, often an ISP point of presence rather than your street address. Every site you
+        visit already sees your public IP; NetPulse masks it by default so a screenshot doesn't
+        leak it, and nothing on this page is sent anywhere or stored.
       </p>
 
       <h2 className="panel__h2">Planned checks (not yet available)</h2>

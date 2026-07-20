@@ -161,4 +161,7 @@ The engine is modular under `src/lib/` — `preflight`, `servers`, `latency`,
 
 ## License
 
-[MIT](LICENSE) © bbarc0de
+[GNU AGPL-3.0](LICENSE) © 2026 NetPulse and contributors.
+
+NetPulse is an independent project and is not affiliated with Ookla, Netflix,
+Speedtest, or FAST.com.

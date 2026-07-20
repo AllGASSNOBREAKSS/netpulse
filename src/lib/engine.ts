@@ -14,7 +14,7 @@ import { computeBufferbloat, computeStability } from "./grading";
 import { maskIp } from "./ip";
 import { measureIdleLatency, pingOnce } from "./latency";
 import { runPreflight } from "./preflight";
-import { getServer, selectServer } from "./servers";
+import { coloDistanceKm, fetchMeta, selectServer } from "./servers";
 import { summarize } from "./stats";
 import { downloadPhase, uploadPhase } from "./throughput";
 import { probePacketLoss } from "./packetloss";
@@ -54,25 +54,21 @@ export const PROFILES = {
     dlStreams: 2,
     ulStreams: 1,
   },
+  // Light profile for guided A/B diagnostics — small caps so a multi-step
+  // session doesn't consume hundreds of MB. ~15–25 MB per run.
+  quick: {
+    idleProbes: 8,
+    serverProbes: 3,
+    single: { streams: 1, chunkBytes: 5_000_000, minMs: 1500, maxMs: 3000, maxBytes: 6_000_000 },
+    multi: { streams: 3, chunkBytes: 5_000_000, minMs: 1500, maxMs: 3500, maxBytes: 12_000_000 },
+    upload: { streams: 2, chunkBytes: 1_000_000, minMs: 1500, maxMs: 3000, maxBytes: 5_000_000 },
+    dlStreams: 3,
+    ulStreams: 2,
+  },
 } as const;
 
-type TraceInfo = Record<string, string>;
-async function fetchTrace(serverId: string): Promise<TraceInfo | null> {
-  try {
-    const t = await (await fetch(getServer(serverId).tracePath, { cache: "no-store" })).text();
-    const info: TraceInfo = {};
-    for (const line of t.trim().split("\n")) {
-      const [k, v] = line.split("=");
-      if (k && v) info[k] = v;
-    }
-    return info;
-  } catch {
-    return null;
-  }
-}
-
 export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<TestResult> {
-  const P = cfg.lowData ? PROFILES.lowData : PROFILES.full;
+  const P = PROFILES[cfg.profile ?? (cfg.lowData ? "lowData" : "full")];
   const start = performance.now();
   const samples: Sample[] = [];
   let errors = 0;
@@ -167,19 +163,23 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
     const bufferbloat = computeBufferbloat(idleLatency, loadedDown, loadedUp);
     const stability = computeStability(idleLatency.median, [...loadedDownRtts, ...upload.rtts], multi.cov);
 
-    const trace = await fetchTrace(serverId);
-    const rawIp = trace?.ip ?? "";
-    const ipFamily: IspLocation["ipFamily"] = rawIp.includes(":") ? "IPv6" : rawIp ? "IPv4" : "unknown";
+    // Real ISP / ASN / geo / distance from Cloudflare's /meta endpoint.
+    const meta = await fetchMeta(serverId);
+    if (meta) {
+      const dist = coloDistanceKm(meta);
+      server.chosen.approxDistanceKm = dist;
+      server.chosen.region = meta.coloCity ? `${meta.coloCity} (${meta.colo})` : server.chosen.city;
+    }
     const ispLocation: IspLocation = {
-      ispHint: null,
-      asn: null,
-      city: trace?.colo ?? null,
-      region: trace?.loc ?? null,
-      country: trace?.loc ?? null,
-      ipFamily,
-      ipMasked: maskIp(rawIp),
+      ispHint: meta?.org ?? null,
+      asn: meta?.asn != null ? `AS${meta.asn}${meta.org ? ` ${meta.org}` : ""}` : null,
+      city: meta?.city ?? null,
+      region: meta?.region ?? null,
+      country: meta?.country ?? null,
+      ipFamily: meta?.ipFamily ?? "unknown",
+      ipMasked: maskIp(meta?.clientIp ?? ""),
       vpnProxy: preflight.vpnProxy,
-      note: "Location is inferred from your IP and reflects the network's routing region — often the ISP's point of presence, not your exact address. NetPulse does not resolve your retail ISP name or ASN from the browser.",
+      note: "ISP, ASN and location come from Cloudflare's edge view of your connection. Location is approximate and reflects your network's routing region — often an ISP point of presence, not your street address. The full public IP is never stored or exported.",
     };
 
     const dataUsedMB = (single.bytes + multi.bytes + upload.bytes) / 1_000_000;

@@ -1,13 +1,16 @@
 /**
- * Server registry, probing, and selection.
+ * Server registry, probing, selection, and network metadata.
  *
  * Honesty note: a browser can only reach measurement endpoints that serve
- * permissive CORS headers and support no-store range/stream downloads plus
- * POST uploads. Cloudflare's speed endpoint is the one production-grade
- * provider that does all of this, and it is anycast — you are automatically
- * routed to the nearest of Cloudflare's 300+ edge locations ("colo"). The
- * registry and ranking below are genuinely multi-server; today one provider
- * is registered, and the UI states that plainly rather than inventing peers.
+ * permissive CORS headers and support no-store streaming downloads plus POST
+ * uploads. Cloudflare's speed endpoint is the one production-grade provider
+ * that does all of this, and it is anycast — you are routed to the nearest of
+ * Cloudflare's edge locations ("colo"). The registry and ranking below are
+ * genuinely multi-server; today one provider is registered, and the UI states
+ * that plainly rather than inventing peers.
+ *
+ * Real network metadata (ISP, ASN, client + server geo, distance) comes from
+ * Cloudflare's `/meta` endpoint — the same source speed.cloudflare.com uses.
  */
 import { summarize } from "./stats";
 import type { ServerProbe, ServerSelection } from "./types";
@@ -15,13 +18,14 @@ import type { ServerProbe, ServerSelection } from "./types";
 export type ServerCandidate = {
   id: string;
   provider: string;
-  /** Base origin for down/up/trace. */
   base: string;
   downPath: (bytes: number) => string;
   upPath: string;
   tracePath: string;
+  metaPath: string;
   protocol: string;
-  /** Full throughput protocol supported (down + up), vs latency-only. */
+  /** The server operator's own ASN — factual reference data, not measured. */
+  asn: string;
   throughput: boolean;
 };
 
@@ -33,7 +37,9 @@ export const SERVERS: ServerCandidate[] = [
     downPath: (bytes) => `https://speed.cloudflare.com/__down?bytes=${bytes}`,
     upPath: "https://speed.cloudflare.com/__up",
     tracePath: "https://speed.cloudflare.com/cdn-cgi/trace",
+    metaPath: "https://speed.cloudflare.com/meta",
     protocol: "HTTPS (fetch, anycast)",
+    asn: "AS13335 Cloudflare",
     throughput: true,
   },
 ];
@@ -42,8 +48,8 @@ export function getServer(id: string | undefined): ServerCandidate {
   return SERVERS.find((s) => s.id === id) ?? SERVERS[0];
 }
 
-/** Approximate great-circle distance in km. */
-function haversineKm(a: [number, number], b: [number, number]): number {
+/** Great-circle distance in km between two [lat, lon] points. */
+export function haversineKm(a: [number, number], b: [number, number]): number {
   const R = 6371;
   const dLat = ((b[0] - a[0]) * Math.PI) / 180;
   const dLon = ((b[1] - a[1]) * Math.PI) / 180;
@@ -53,11 +59,66 @@ function haversineKm(a: [number, number], b: [number, number]): number {
   return Math.round(2 * R * Math.asin(Math.sqrt(h)));
 }
 
+/* ---- Network metadata (real, from /meta) ---------------------------------- */
+export type NetworkMeta = {
+  clientIp: string;
+  ipFamily: "IPv4" | "IPv6" | "unknown";
+  asn: number | null;
+  org: string | null; // the actual ISP name, e.g. "Optimum Online"
+  city: string | null;
+  region: string | null;
+  country: string | null;
+  clientLat: number | null;
+  clientLon: number | null;
+  colo: string | null; // server IATA code, e.g. "EWR"
+  coloCity: string | null;
+  coloLat: number | null;
+  coloLon: number | null;
+};
+
+export async function fetchMeta(serverId: string | undefined): Promise<NetworkMeta | null> {
+  try {
+    const j = await (await fetch(getServer(serverId).metaPath, { cache: "no-store" })).json();
+    const ip: string = j.clientIp ?? "";
+    const colo = j.colo ?? {};
+    return {
+      clientIp: ip,
+      ipFamily: ip.includes(":") ? "IPv6" : ip ? "IPv4" : "unknown",
+      asn: typeof j.asn === "number" ? j.asn : null,
+      org: j.asOrganization ?? null,
+      city: j.city ?? null,
+      region: j.region ?? null,
+      country: j.country ?? null,
+      clientLat: numOrNull(j.latitude),
+      clientLon: numOrNull(j.longitude),
+      colo: colo.iata ?? null,
+      coloCity: colo.city ?? null,
+      coloLat: numOrNull(colo.lat),
+      coloLon: numOrNull(colo.lon),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Real client↔colo distance when both coordinates are present, else null. */
+export function coloDistanceKm(m: NetworkMeta | null): number | null {
+  if (!m || m.clientLat == null || m.clientLon == null || m.coloLat == null || m.coloLon == null) return null;
+  return haversineKm([m.clientLat, m.clientLon], [m.coloLat, m.coloLon]);
+}
+
+function numOrNull(v: unknown): number | null {
+  const n = typeof v === "string" ? parseFloat(v) : typeof v === "number" ? v : NaN;
+  return Number.isFinite(n) ? n : null;
+}
+
+/* ---- Probing + selection -------------------------------------------------- */
 async function pingServer(c: ServerCandidate): Promise<number | null> {
   const t0 = performance.now();
   try {
     const res = await fetch(c.downPath(0), { cache: "no-store" });
     if (!res.ok) return null;
+    await res.arrayBuffer();
     return performance.now() - t0;
   } catch {
     return null;
@@ -65,7 +126,6 @@ async function pingServer(c: ServerCandidate): Promise<number | null> {
 }
 
 type TraceInfo = Record<string, string>;
-
 async function fetchTrace(c: ServerCandidate): Promise<TraceInfo | null> {
   try {
     const t = await (await fetch(c.tracePath, { cache: "no-store" })).text();
@@ -80,14 +140,9 @@ async function fetchTrace(c: ServerCandidate): Promise<TraceInfo | null> {
   }
 }
 
-/**
- * Probe one candidate: N latency samples + trace metadata. `clientLoc` is the
- * caller's [lat,lon] parsed from the trace `loc`/geo when available so distance
- * is a real estimate, not a guess.
- */
 async function probeCandidate(c: ServerCandidate, samples: number): Promise<ServerProbe> {
   const trace = await fetchTrace(c);
-  await pingServer(c); // warm-up (DNS/TLS), discarded
+  await pingServer(c); // warm-up, discarded
   const rtts: number[] = [];
   let failed = 0;
   for (let i = 0; i < samples; i++) {
@@ -95,69 +150,31 @@ async function probeCandidate(c: ServerCandidate, samples: number): Promise<Serv
     if (rtt === null) failed++;
     else rtts.push(rtt);
   }
-  const latency = summarize(rtts);
   const ip = trace?.ip ?? "";
   const ipFamily: ServerProbe["ipFamily"] = ip.includes(":") ? "IPv6" : ip ? "IPv4" : "unknown";
-
-  // Colo distance: Cloudflare exposes the serving colo code but not its coords
-  // over CORS, so distance stays null unless a geo hint is present. We never
-  // fabricate a number.
-  const approxDistanceKm =
-    trace?.loc && trace.colo && COLO_COORDS[trace.colo]
-      ? haversineKm(parseLoc(trace.loc) ?? COLO_COORDS[trace.colo], COLO_COORDS[trace.colo])
-      : null;
-
   return {
     id: c.id,
     provider: c.provider,
-    city: trace?.colo ?? null,
-    region: trace?.loc ?? null,
-    approxDistanceKm,
-    asn: null,
+    city: trace?.colo ?? null, // server colo code; enriched with distance/geo later
+    region: null,
+    approxDistanceKm: null, // set from /meta after selection (real client↔colo)
+    asn: c.asn,
     protocol: c.protocol,
     ipFamily,
-    latency,
+    latency: summarize(rtts),
     available: rtts.length > 0,
     rank: 0,
   };
 }
 
-function parseLoc(loc: string): [number, number] | null {
-  // Cloudflare `loc` is a country code, not coordinates — no parse possible.
-  void loc;
-  return null;
-}
-
-/** A tiny sampling of Cloudflare colo coordinates for distance estimates. */
-const COLO_COORDS: Record<string, [number, number]> = {
-  IAD: [38.94, -77.46],
-  EWR: [40.69, -74.17],
-  LAX: [33.94, -118.4],
-  SJC: [37.36, -121.93],
-  ORD: [41.97, -87.9],
-  DFW: [32.9, -97.04],
-  ATL: [33.64, -84.43],
-  MIA: [25.8, -80.28],
-  LHR: [51.47, -0.46],
-  CDG: [49.0, 2.55],
-  FRA: [50.03, 8.56],
-  AMS: [52.31, 4.76],
-  SIN: [1.36, 103.99],
-  NRT: [35.77, 140.39],
-  SYD: [-33.95, 151.18],
-};
-
-/**
- * Rank = availability × latency × consistency. Lower median latency and lower
- * jitter rank higher; unavailable servers rank 0.
- */
+/** Rank = availability × latency × consistency. Unavailable → 0. */
 export function rankProbes(probes: ServerProbe[]): ServerProbe[] {
   const avail = probes.filter((p) => p.available);
   const bestMed = Math.min(...avail.map((p) => p.latency.median), Infinity);
   return probes
     .map((p) => {
       if (!p.available) return { ...p, rank: 0 };
-      const latScore = bestMed / Math.max(p.latency.median, 1); // 1.0 for the fastest
+      const latScore = bestMed / Math.max(p.latency.median, 1);
       const jitScore = 1 / (1 + p.latency.jitter / 10);
       return { ...p, rank: Math.round(latScore * 0.7 * 100 + jitScore * 0.3 * 100) / 100 };
     })

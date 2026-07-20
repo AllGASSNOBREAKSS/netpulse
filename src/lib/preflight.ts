@@ -9,7 +9,7 @@
 import { getServer } from "./servers";
 import type { Preflight, TestConfig, TriState } from "./types";
 
-function detectBrowser(ua: string): string {
+export function detectBrowser(ua: string): string {
   // Order matters: Edge/Brave/Opera masquerade as Chrome.
   if (/Edg\//.test(ua)) return "Edge";
   if (/OPR\/|Opera/.test(ua)) return "Opera";
@@ -19,7 +19,7 @@ function detectBrowser(ua: string): string {
   return "Unknown browser";
 }
 
-function detectOS(ua: string): string {
+export function detectOS(ua: string): string {
   if (/Windows NT 10/.test(ua)) return "Windows 10/11";
   if (/Windows/.test(ua)) return "Windows";
   if (/Mac OS X/.test(ua)) return "macOS";
@@ -29,7 +29,7 @@ function detectOS(ua: string): string {
   return "Unknown OS";
 }
 
-function detectDeviceClass(): Preflight["deviceClass"] {
+export function detectDeviceClass(): Preflight["deviceClass"] {
   const uaData = (navigator as unknown as { userAgentData?: { mobile?: boolean } }).userAgentData;
   if (uaData?.mobile) return "mobile";
   const ua = navigator.userAgent;

@@ -55,14 +55,95 @@ export function buildExport(result: TestResult, verdict: Verdict | null) {
   };
 }
 
-export function downloadJson(result: TestResult, verdict: Verdict | null) {
-  const blob = new Blob([JSON.stringify(buildExport(result, verdict), null, 2)], { type: "application/json" });
+/* ---- Generic download / CSV helpers --------------------------------------- */
+export function downloadText(filename: string, text: string, mime = "text/plain") {
+  const blob = new Blob([text], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `netpulse-${new Date(result.timestamp).toISOString().replace(/[:.]/g, "-")}.json`;
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+export function toCsv(rows: Record<string, string | number>[]): string {
+  if (rows.length === 0) return "";
+  const cols = Object.keys(rows[0]);
+  const esc = (v: string | number) => {
+    const s = String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  return [cols.join(","), ...rows.map((r) => cols.map((c) => esc(r[c])).join(","))].join("\n");
+}
+
+export function downloadCsv(filename: string, rows: Record<string, string | number>[]) {
+  downloadText(filename, toCsv(rows), "text/csv");
+}
+
+const stamp = (ts: number) => new Date(ts).toISOString().replace(/[:.]/g, "-");
+
+export function downloadJson(result: TestResult, verdict: Verdict | null) {
+  downloadText(`netpulse-${stamp(result.timestamp)}.json`, JSON.stringify(buildExport(result, verdict), null, 2), "application/json");
+}
+
+/** Flatten a result to a single CSV row of the headline metrics. */
+export function resultCsvRows(result: TestResult, verdict: Verdict | null): Record<string, string | number>[] {
+  return [
+    {
+      timestamp: new Date(result.timestamp).toISOString(),
+      health_score: verdict?.score ?? "",
+      confidence: result.confidence.score,
+      download_mbps: result.downloadMbps.toFixed(1),
+      upload_mbps: result.uploadMbps.toFixed(1),
+      idle_latency_ms: Math.round(result.idlePingMs),
+      loaded_down_ms: Math.round(result.loadedDownPingMs),
+      loaded_up_ms: Math.round(result.loadedUpPingMs),
+      jitter_ms: result.idleJitterMs.toFixed(1),
+      bufferbloat_ms: Math.round(result.bufferbloatMs),
+      bufferbloat_grade: result.bufferbloatGrade,
+      stability: result.stability.score,
+      udp_reachable: result.packetLoss.udpReachable,
+      isp: result.ispLocation.ispHint ?? "",
+      asn: result.ispLocation.asn ?? "",
+      server: `${result.server.chosen.provider} ${result.server.chosen.city ?? ""}`.trim(),
+      data_mb: Math.round(result.dataUsedMB),
+      duration_s: (result.durationMs / 1000).toFixed(1),
+    },
+  ];
+}
+
+export function downloadCsvResult(result: TestResult, verdict: Verdict | null) {
+  downloadCsv(`netpulse-${stamp(result.timestamp)}.csv`, resultCsvRows(result, verdict));
+}
+
+/** Privacy-safe shareable report (Markdown). No full IP; precise city omitted. */
+export function buildShareReport(result: TestResult, verdict: Verdict | null): string {
+  const r = result;
+  const L = (n: number, d = 0) => n.toFixed(d);
+  return [
+    `# NetPulse report`,
+    ``,
+    `**Overall health:** ${verdict?.score ?? "—"}/100 — ${verdict?.headline ?? ""}`,
+    `**Result confidence:** ${r.confidence.score}% (${r.confidence.summary})`,
+    ``,
+    `## Metrics`,
+    `- Download: **${L(r.downloadMbps, 1)} Mbps**  (single ${L(r.download.single.mbps, 1)} / multi ${L(r.download.multi.mbps, 1)})`,
+    `- Upload: **${L(r.uploadMbps, 1)} Mbps**  (peak ${L(r.upload.peakMbps, 1)})`,
+    `- Idle latency: **${L(r.idlePingMs)} ms**  (p95 ${L(r.idleLatency.p95)}, jitter ${L(r.idleJitterMs, 1)})`,
+    `- Loaded latency: down ${L(r.loadedDownPingMs)} ms / up ${L(r.loadedUpPingMs)} ms`,
+    `- Bufferbloat: **${r.bufferbloatGrade}** (+${L(r.bufferbloatMs)} ms; down ${r.bufferbloat.downloadGrade} / up ${r.bufferbloat.uploadGrade})`,
+    `- Stability: ${r.stability.score}/100 · Packet loss (UDP reachability): ${r.packetLoss.udpReachable}`,
+    ``,
+    `## Network`,
+    `- ISP: ${r.ispLocation.ispHint ?? "unknown"}${r.ispLocation.asn ? ` (${r.ispLocation.asn.split(" ")[0]})` : ""}`,
+    `- Region: ${r.ispLocation.region ?? "unknown"}, ${r.ispLocation.country ?? ""}`.replace(/, $/, ""),
+    `- Test server: ${r.server.chosen.provider} ${r.server.chosen.city ?? ""}${r.server.chosen.approxDistanceKm != null ? ` (~${r.server.chosen.approxDistanceKm} km)` : ""}`,
+    ``,
+    `## Diagnosis`,
+    ...(verdict?.bad.length ? verdict.bad.map((b) => `- ⚠ ${b}`) : ["- No major problems found."]),
+    ``,
+    `_Measured with NetPulse against Cloudflare's anycast endpoint. Public IP omitted for privacy. Results reflect the path to the nearest Cloudflare edge and differ from other speed tests by design._`,
+  ].join("\n");
 }
