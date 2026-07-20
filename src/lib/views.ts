@@ -9,4 +9,9 @@ export type View =
   | "privacy"
   | "calculator"
   | "guides"
-  | "faq";
+  | "faq"
+  // Designed but not yet measurable — these render honest "in development"
+  // states rather than being dead links in the sidebar.
+  | "areapulse"
+  | "planreality"
+  | "reports";

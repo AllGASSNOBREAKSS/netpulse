@@ -8,95 +8,126 @@
  * The legacy custom-CSS surfaces in styles.css consume the --np-* aliases at
  * the bottom, so the whole app (gauges, modals, panels) themes together.
  */
-@import "tailwindcss";
+/* ---- Cascade layer order (declare ONCE, before any @import) ----
+   Later layers beat earlier ones regardless of specificity, and unlayered CSS
+   beats every layer. So every stylesheet below is assigned a layer on purpose:
+
+     reset        Astryx's :where() reset — lowest, overrides nothing
+     theme/base   Tailwind v4 @theme vars + Preflight
+     astryx-*     Astryx component base + theme tokens (must beat Preflight)
+     np-legacy    styles.css — NetPulse gauges/modals/panels (beats Astryx
+                  defaults so the custom speedometers keep their own look)
+     components   shadcn/ui primitives still in use
+     utilities    Tailwind utilities — must stay last so app classes win
+
+   Tailwind is imported as its three parts instead of `@import "tailwindcss"`
+   so Preflight can be layered; unlayered Preflight silently overrides Astryx
+   theme CSS. See `npx astryx docs migration` → Cascade Layer Safety. */
+@layer reset, theme, base, astryx-base, astryx-theme, np-legacy, components, utilities;
+
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/preflight.css" layer(base);
+
+@import "@astryxdesign/core/reset.css";
+@import "@astryxdesign/core/astryx.css";
+@import "@astryxdesign/theme-neutral/theme.css";
+@import "@astryxdesign/core/tailwind-theme.css";
+
+@import "./styles.css" layer(np-legacy);
+
+@import "tailwindcss/utilities.css" layer(utilities);
 
 @custom-variant dark (&:is(.dark *));
 
-/* ---- Light theme ---- */
+/* ---- Light theme ----
+   Values are kept in lockstep with src/theme/netpulse.ts so Astryx components
+   and the shadcn/legacy surfaces resolve to the SAME colors. If you change one,
+   change the other. */
 :root {
-  --radius: 0.625rem;
+  --radius: 0.5rem;
 
-  --background: oklch(0.985 0.002 247);
-  --foreground: oklch(0.16 0.01 255);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.16 0.01 255);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.16 0.01 255);
-  --primary: oklch(0.55 0.2 258);
-  --primary-foreground: oklch(0.985 0.002 247);
-  --secondary: oklch(0.955 0.004 247);
-  --secondary-foreground: oklch(0.2 0.01 255);
-  --muted: oklch(0.955 0.004 247);
-  --muted-foreground: oklch(0.48 0.015 255);
-  --accent: oklch(0.945 0.006 250);
-  --accent-foreground: oklch(0.2 0.01 255);
-  --destructive: oklch(0.577 0.215 27);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.905 0.005 247);
-  --input: oklch(0.905 0.005 247);
-  --ring: oklch(0.55 0.2 258);
+  --background: #fafafb;
+  --foreground: #101114;
+  --card: #ffffff;
+  --card-foreground: #101114;
+  --popover: #ffffff;
+  --popover-foreground: #101114;
+  --primary: #0b5fd9;
+  --primary-foreground: #ffffff;
+  --secondary: #f2f3f5;
+  --secondary-foreground: #101114;
+  --muted: #f2f3f5;
+  --muted-foreground: #5c626d;
+  --accent: #eef0f3;
+  --accent-foreground: #101114;
+  --destructive: #c4342b;
+  --destructive-foreground: #ffffff;
+  --border: #e6e7ea;
+  --input: #d9dbe0;
+  --ring: #0b5fd9;
 
-  --chart-1: oklch(0.55 0.2 258);
-  --chart-2: oklch(0.65 0.17 162);
-  --chart-3: oklch(0.75 0.16 70);
-  --chart-4: oklch(0.6 0.2 300);
-  --chart-5: oklch(0.6 0.22 20);
+  --chart-1: #0b5fd9;
+  --chart-2: #1a8a4f;
+  --chart-3: #b26a00;
+  --chart-4: #7048c9;
+  --chart-5: #c4342b;
 
-  --sidebar: oklch(0.965 0.003 247);
-  --sidebar-foreground: oklch(0.2 0.01 255);
-  --sidebar-primary: oklch(0.55 0.2 258);
-  --sidebar-primary-foreground: oklch(0.985 0.002 247);
-  --sidebar-accent: oklch(0.93 0.006 250);
-  --sidebar-accent-foreground: oklch(0.2 0.01 255);
-  --sidebar-border: oklch(0.9 0.005 247);
-  --sidebar-ring: oklch(0.55 0.2 258);
+  --sidebar: #f4f5f7;
+  --sidebar-foreground: #101114;
+  --sidebar-primary: #0b5fd9;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e8eaee;
+  --sidebar-accent-foreground: #101114;
+  --sidebar-border: #e0e2e6;
+  --sidebar-ring: #0b5fd9;
 
-  /* Status */
-  --status-good: oklch(0.6 0.16 155);
-  --status-warn: oklch(0.72 0.16 60);
-  --status-bad: oklch(0.577 0.215 27);
+  /* Status: green healthy, orange warning, red failure only. */
+  --status-good: #1a8a4f;
+  --status-warn: #b26a00;
+  --status-bad: #c4342b;
 }
 
-/* ---- Dark theme (product default) ---- */
+/* ---- Dark theme (product default) ----
+   Deep-black workspace, charcoal sidebar and elevated surfaces. */
 .dark {
-  --background: oklch(0.145 0.004 255);
-  --foreground: oklch(0.93 0.006 250);
-  --card: oklch(0.185 0.005 255);
-  --card-foreground: oklch(0.93 0.006 250);
-  --popover: oklch(0.2 0.005 255);
-  --popover-foreground: oklch(0.93 0.006 250);
-  --primary: oklch(0.68 0.16 255);
-  --primary-foreground: oklch(0.13 0.01 255);
-  --secondary: oklch(0.24 0.006 255);
-  --secondary-foreground: oklch(0.93 0.006 250);
-  --muted: oklch(0.24 0.006 255);
-  --muted-foreground: oklch(0.68 0.012 252);
-  --accent: oklch(0.26 0.008 255);
-  --accent-foreground: oklch(0.93 0.006 250);
-  --destructive: oklch(0.62 0.19 25);
-  --destructive-foreground: oklch(0.97 0 0);
-  --border: oklch(0.27 0.006 255);
-  --input: oklch(0.27 0.006 255);
-  --ring: oklch(0.68 0.16 255);
+  --background: #08090b;
+  --foreground: #f4f5f7;
+  --card: #141519;
+  --card-foreground: #f4f5f7;
+  --popover: #17181d;
+  --popover-foreground: #f4f5f7;
+  --primary: #1d6bf0;
+  --primary-foreground: #ffffff;
+  --secondary: #1a1b20;
+  --secondary-foreground: #f4f5f7;
+  --muted: #1a1b20;
+  --muted-foreground: #9ba1ac;
+  --accent: #1c1e24;
+  --accent-foreground: #f4f5f7;
+  --destructive: #f2635a;
+  --destructive-foreground: #14090a;
+  --border: #23252b;
+  --input: #2b2e35;
+  --ring: #3a7dff;
 
-  --chart-1: oklch(0.68 0.16 255);
-  --chart-2: oklch(0.72 0.15 162);
-  --chart-3: oklch(0.78 0.14 70);
-  --chart-4: oklch(0.66 0.18 300);
-  --chart-5: oklch(0.66 0.2 20);
+  --chart-1: #4b8dff;
+  --chart-2: #3dd68c;
+  --chart-3: #f0a93b;
+  --chart-4: #a98bff;
+  --chart-5: #f2635a;
 
-  --sidebar: oklch(0.17 0.005 255);
-  --sidebar-foreground: oklch(0.93 0.006 250);
-  --sidebar-primary: oklch(0.68 0.16 255);
-  --sidebar-primary-foreground: oklch(0.13 0.01 255);
-  --sidebar-accent: oklch(0.24 0.008 255);
-  --sidebar-accent-foreground: oklch(0.93 0.006 250);
-  --sidebar-border: oklch(0.24 0.006 255);
-  --sidebar-ring: oklch(0.68 0.16 255);
+  --sidebar: #0e0f12;
+  --sidebar-foreground: #f4f5f7;
+  --sidebar-primary: #1d6bf0;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #1a1b20;
+  --sidebar-accent-foreground: #f4f5f7;
+  --sidebar-border: #1c1e24;
+  --sidebar-ring: #3a7dff;
 
-  --status-good: oklch(0.75 0.16 155);
-  --status-warn: oklch(0.78 0.15 65);
-  --status-bad: oklch(0.68 0.19 25);
+  --status-good: #3dd68c;
+  --status-warn: #f0a93b;
+  --status-bad: #f2635a;
 }
 
 /* ---- Tailwind theme bridge ---- */
@@ -150,15 +181,69 @@
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border;
   }
   html {
     @apply bg-background;
+    /* One content width for header, main and footer, so the three can never
+       drift out of alignment. */
+    --np-content: 68rem;
+    --np-gutter: 1.25rem;
+  }
+  @media (min-width: 640px) {
+    html {
+      --np-gutter: 1.75rem;
+    }
+  }
+  @media (min-width: 1280px) {
+    html {
+      --np-gutter: 2.5rem;
+    }
   }
   body {
     @apply bg-background text-foreground font-sans antialiased;
     font-size: 15px;
     line-height: 1.6;
+  }
+
+  /* One visible focus indicator for the whole product (WCAG 2.4.7). */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+}
+
+@layer components {
+  /* The shared content container. Header, main and footer all use it, which is
+     what keeps them aligned at every width. */
+  .np-container {
+    margin-inline: auto;
+    width: 100%;
+    max-width: var(--np-content);
+    padding-inline: var(--np-gutter);
+  }
+}
+
+/* Motion is opt-out at the source, not per component. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
 

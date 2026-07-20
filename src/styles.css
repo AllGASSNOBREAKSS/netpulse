@@ -20,24 +20,48 @@ html, body {
   line-height: 1.6;
 }
 
-/* ================= Twin gauges ================= */
+/* ================= Twin gauges =================
+   Both gauges are the same component with the same CSS, so identical
+   dimensions, typography and tick spacing are structural, not a coincidence
+   two blocks of CSS have to keep agreeing on. Sizing is fluid: the SVG is
+   viewBox-driven and the container is width-constrained only. */
 .np-gauge { position: relative; width: 100%; max-width: 340px; margin: 0 auto; }
-.np-gauge__svg { display: block; width: 100%; height: auto; }
-.np-gauge__track { fill: none; stroke: color-mix(in oklab, var(--border) 55%, transparent); stroke-width: 10; }
-.np-gauge__ring { fill: none; stroke: color-mix(in oklab, var(--foreground) 50%, transparent); stroke-width: 1.4; }
-.np-gauge__redzone { fill: none; stroke: var(--status-bad); stroke-width: 3; stroke-linecap: round; }
-.np-gauge__sweep { fill: none; stroke-width: 10; stroke-linecap: butt; transition: stroke 0.3s ease; }
+.np-gauge__svg { display: block; width: 100%; height: auto; overflow: visible; }
+.np-gauge__track { fill: none; stroke: color-mix(in oklab, var(--border) 80%, transparent); stroke-width: 10; }
+.np-gauge__ring { fill: none; stroke: color-mix(in oklab, var(--foreground) 22%, transparent); stroke-width: 1.2; }
+.np-gauge__sweep { fill: none; stroke-width: 10; stroke-linecap: butt; }
+.np-gauge__cap { fill: var(--primary); }
 .np-gauge__needle { stroke: var(--foreground); stroke-width: 2.2; stroke-linecap: round; }
-.np-gauge__tick { stroke: color-mix(in oklab, var(--foreground) 32%, transparent); stroke-width: 1.3; }
-.np-gauge__tick--major { stroke: color-mix(in oklab, var(--foreground) 65%, transparent); stroke-width: 2; }
-.np-gauge__scale { position: absolute; font-family: var(--mono); font-size: 11px; color: var(--np-muted); }
+.np-gauge__hub { fill: color-mix(in oklab, var(--foreground) 70%, transparent); }
+
+/* Tick activation is driven by the same fraction as the needle. */
+.np-gauge__tick,
+.np-gauge__tick--major {
+  stroke: color-mix(in oklab, var(--foreground) 22%, transparent);
+  transition: stroke 180ms ease;
+}
+.np-gauge__tick { stroke-width: 1.3; }
+.np-gauge__tick--major { stroke-width: 2; stroke: color-mix(in oklab, var(--foreground) 42%, transparent); }
+.np-gauge__tick[data-on],
+.np-gauge__tick--major[data-on] { stroke: var(--primary); }
+
+.np-gauge__scale { position: absolute; font-family: var(--mono); font-size: 11px; color: var(--np-muted); font-variant-numeric: tabular-nums; }
 .np-gauge__scale--zero { left: 15%; bottom: 10%; }
 .np-gauge__scale--mid { top: 2.5%; left: 50%; transform: translateX(-50%); }
 .np-gauge__scale--max { right: 13%; bottom: 10%; }
-.np-gauge__center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; pointer-events: none; }
+.np-gauge__center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; pointer-events: none; }
 .np-gauge__label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--np-muted); }
-.np-gauge__value { font-family: var(--cluster); font-style: italic; font-weight: 900; font-size: clamp(38px, 8vw, 56px); line-height: 1; letter-spacing: -0.03em; color: var(--text); font-variant-numeric: tabular-nums; transition: color 0.3s ease; }
-.np-gauge__value[data-hot] { color: var(--status-warn); }
+.np-gauge__value {
+  font-family: var(--cluster);
+  font-weight: 700;
+  font-size: clamp(36px, 7.5vw, 52px);
+  line-height: 1;
+  letter-spacing: -0.035em;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  transition: color 240ms ease;
+}
+.np-gauge__value[data-idle] { color: var(--np-muted); }
 .np-gauge__unit { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.3em; color: var(--np-muted); }
 
 
@@ -590,3 +614,26 @@ html, body {
   mask-image: linear-gradient(to right, transparent 22%, #000 78%);
 }
 :root:not(.dark) .np-footer__noise { mix-blend-mode: multiply; opacity: 0.35; }
+
+/* ================= Site-wide right-side noise backdrop =================
+   Fixed grain on the right of the workspace, faded in center→right, echoing
+   the footer treatment across the whole app. Sits behind page content
+   (#main is relative z-10). Monochrome fractal noise + faint radial lift;
+   screen blend on dark, multiply on light. Purely decorative, pointer-safe. */
+.site-noise {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(100% 120% at 100% 28%, color-mix(in oklab, var(--foreground) 6%, transparent), transparent 58%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat, repeat;
+  background-size: cover, 200px 200px;
+  opacity: 0.45;
+  mix-blend-mode: screen;
+  -webkit-mask-image: linear-gradient(to right, transparent 42%, #000 88%);
+  mask-image: linear-gradient(to right, transparent 42%, #000 88%);
+}
+:root:not(.dark) .site-noise { mix-blend-mode: multiply; opacity: 0.28; }
+@media (max-width: 640px) { .site-noise { opacity: 0.3; } }

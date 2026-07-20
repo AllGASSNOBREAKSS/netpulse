@@ -1,8 +1,8 @@
 import { lazy, Suspense, useCallback, useRef, useState } from "react";
 import { ArrowRight, Play, Share2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { PageHeader, Section, StatGrid } from "@/components/np/Layout";
 import { AppHeader } from "@/components/AppHeader";
 import { AppSidebar } from "@/components/AppSidebar";
 import { NpFooter } from "@/components/Footer";
@@ -18,6 +18,7 @@ const ResultsPage = lazy(() => import("@/pages/Results").then((m) => ({ default:
 const HistoryPage = lazy(() => import("@/pages/HistoryPage").then((m) => ({ default: m.HistoryPage })));
 import { ConnectionDetailsPage } from "@/pages/ConnectionDetails";
 import { CalculatorPage, FaqPage, GuidesPage } from "@/pages/Learn";
+import { UpcomingPage } from "@/pages/Upcoming";
 import { runTest, type Phase, type TestResult } from "@/lib/engine";
 import { buildShareReport } from "@/lib/export";
 import { METRICS } from "@/lib/metrics";
@@ -142,112 +143,143 @@ export default function App() {
   const isUploadPhase = phase === "upload";
 
   /* ---- Speed Test page ---- */
+  const fmtMbps = (n: number) => (n >= 100 ? String(Math.round(n)) : n.toFixed(1));
+  const approxArea = result
+    ? [result.ispLocation.city, result.ispLocation.region, result.ispLocation.country]
+        .filter(Boolean)
+        .join(", ") || "not available"
+    : "";
+
   const speedPage = (
-    <div className="space-y-6">
-      <div className="text-center">
-        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Speed Test</h1>
-        <p className="mx-auto mt-1 max-w-xl text-sm text-muted-foreground">
-          Measure performance, expose instability, and understand what affects your connection —
-          every number below is measured live, never simulated.
-        </p>
-      </div>
+    <div className="space-y-10">
+      <PageHeader
+        className="justify-center text-center [&>div]:mx-auto [&>div]:text-center"
+        title="Speed Test"
+        description="Throughput, latency under load, jitter and bufferbloat — measured live in this browser, never simulated."
+      />
 
-      <Card className="overflow-hidden">
-        <CardContent className="px-4 py-6 sm:px-8">
-          <div className="grid gap-8 sm:grid-cols-2">
-            <Gauge
-              label="Download"
-              liveMbps={liveDown}
-              active={isDownloadPhase}
-              waiting={running && !isDownloadPhase && !isUploadPhase}
-              done={phase === "done"}
-              finalMbps={result?.downloadMbps ?? null}
-            />
-            <Gauge
-              label="Upload"
-              liveMbps={liveUp}
-              active={isUploadPhase}
-              waiting={running && !isUploadPhase}
-              done={phase === "done"}
-              finalMbps={result?.uploadMbps ?? null}
-            />
-          </div>
+      {/* The measurement stage: one surface, twin gauges, one primary action. */}
+      <section className="rounded-2xl border border-border bg-card px-4 py-8 sm:px-10 sm:py-10">
+        <div className="mx-auto grid max-w-2xl grid-cols-1 gap-10 sm:grid-cols-2 sm:gap-6">
+          <Gauge
+            label="Download"
+            liveMbps={liveDown}
+            active={isDownloadPhase}
+            waiting={running && !isDownloadPhase && !isUploadPhase}
+            done={phase === "done"}
+            finalMbps={result?.downloadMbps ?? null}
+          />
+          <Gauge
+            label="Upload"
+            liveMbps={liveUp}
+            active={isUploadPhase}
+            waiting={running && !isUploadPhase}
+            done={phase === "done"}
+            finalMbps={result?.uploadMbps ?? null}
+          />
+        </div>
 
-          <div className="mt-5 flex flex-col items-center gap-4">
-            <div className="stage__status" role="status">
-              {running && <span className="pulse-dot" aria-hidden="true" />}
-              {PHASE_LABEL[phase]}
-            </div>
+        <div className="mt-8 flex flex-col items-center gap-6">
+          <p
+            className="flex items-center gap-2 font-mono text-[12px] text-muted-foreground"
+            role="status"
+            aria-live="polite"
+          >
+            {running && <span className="pulse-dot" aria-hidden="true" />}
+            {PHASE_LABEL[phase]}
+          </p>
 
-            {verdict && result && phase === "done" && (
-              <button
-                onClick={() => setShowScore(true)}
-                className="w-full max-w-md rounded-xl border bg-accent/40 px-5 py-4 text-left transition-colors hover:border-primary/50"
-                title="See how this score is calculated"
+          <div className="flex flex-wrap items-center justify-center gap-2.5">
+            <Button
+              size="lg"
+              onClick={() => void start()}
+              disabled={running}
+              className="h-11 gap-2 px-8 text-[14px] transition-transform active:scale-[0.98]"
+            >
+              <Play className="size-4" />
+              {running ? "Testing…" : result ? "Run Again" : "Start Test"}
+            </Button>
+            {result && (
+              <Button
+                size="lg"
+                variant="outline"
+                onClick={() => void copyReport()}
+                className="h-11 gap-2 text-[14px] transition-transform active:scale-[0.98]"
               >
-                <div className="flex items-baseline justify-between gap-3">
-                  <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-                    Internet Health
-                  </span>
-                  <span className="text-[11px] text-muted-foreground">
-                    confidence {result.confidence.score}%
-                  </span>
-                </div>
-                <div className="mt-1 flex items-baseline gap-3">
-                  <span className="font-display text-4xl font-extrabold italic">
-                    {verdict.score}
-                    <span className="text-lg text-muted-foreground">/100</span>
-                  </span>
-                  <span className="text-sm text-muted-foreground">{verdict.headline}</span>
-                </div>
-              </button>
-            )}
-
-            <div className="flex flex-wrap items-center justify-center gap-2">
-              <Button size="lg" onClick={() => void start()} disabled={running} className="gap-2 px-8">
-                <Play className="size-4" />
-                {running ? "Testing…" : result ? "Run Again" : "Start Test"}
+                <Share2 className="size-4" /> {reportCopied ? "Copied ✓" : "Share Result"}
               </Button>
-              {result && (
-                <Button size="lg" variant="outline" onClick={() => void copyReport()} className="gap-2">
-                  <Share2 className="size-4" /> {reportCopied ? "Copied ✓" : "Share Result"}
-                </Button>
-              )}
-            </div>
+            )}
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </section>
+
+      {/* Internet Health — the headline verdict, not a metric among metrics. */}
+      {verdict && result && phase === "done" && (
+        <button
+          onClick={() => setShowScore(true)}
+          className="group flex w-full flex-wrap items-center gap-x-8 gap-y-4 rounded-2xl border border-border bg-card px-6 py-6 text-left transition-[border-color,transform] duration-200 hover:-translate-y-0.5 hover:border-primary/40 sm:px-8"
+          title="See how this score is calculated"
+        >
+          <span className="flex items-baseline gap-2">
+            <span className="font-display text-[52px] font-bold leading-none tracking-tight tabular-nums">
+              {verdict.score}
+            </span>
+            <span className="text-lg text-muted-foreground">/100</span>
+          </span>
+          <span className="min-w-0 flex-1 space-y-1">
+            <span className="block text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+              Internet Health
+            </span>
+            <span className="block text-[15px] font-medium">{verdict.headline}</span>
+            <span className="block text-[12.5px] text-muted-foreground">
+              Confidence {result.confidence.score}% · how this score is calculated
+            </span>
+          </span>
+          <ArrowRight className="size-4 shrink-0 text-muted-foreground transition-transform duration-200 group-hover:translate-x-0.5" />
+        </button>
+      )}
 
       {(preflight || server) && !result && <PreflightServer preflight={preflight} server={server} preOnly />}
 
       {result && (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {(
-              [
-                ["Download", `${result.downloadMbps >= 100 ? Math.round(result.downloadMbps) : result.downloadMbps.toFixed(1)} Mbps`, true],
-                ["Upload", `${result.uploadMbps >= 100 ? Math.round(result.uploadMbps) : result.uploadMbps.toFixed(1)} Mbps`, true],
-                ["Idle latency", `${Math.round(result.idlePingMs)} ms`, true],
-                ["Jitter", `${result.idleJitterMs.toFixed(1)} ms`, true],
-                ["Loaded latency", `${Math.round(Math.max(result.loadedDownPingMs, result.loadedUpPingMs))} ms`, true],
-                ["Bufferbloat", `grade ${result.bufferbloatGrade}`, true],
-                ["Test server", `${result.server.chosen.provider}${result.server.chosen.edgeCode ? ` · edge ${result.server.chosen.edgeCode}` : ""}`, false],
-                ["Masked IP", result.ispLocation.ipMasked, true],
-              ] as [string, string, boolean][]
-            ).map(([k, v, mono]) => (
-              <Card key={k} className="py-3">
-                <CardContent className="px-4">
-                  <div className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">{k}</div>
-                  <div className={`mt-0.5 truncate text-sm font-semibold ${mono ? "font-mono" : ""}`} title={v}>
-                    {v}
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+          <Section
+            title="Connection summary"
+            description="The essentials from this run. Full detail, charts and raw samples live in Complete Analysis."
+          >
+            <StatGrid
+              columns={4}
+              stats={[
+                { label: "Download", value: `${fmtMbps(result.downloadMbps)} Mbps` },
+                { label: "Upload", value: `${fmtMbps(result.uploadMbps)} Mbps` },
+                { label: "Idle latency", value: `${Math.round(result.idlePingMs)} ms` },
+                {
+                  label: "Bufferbloat",
+                  value: `Grade ${result.bufferbloatGrade}`,
+                  tone: result.bufferbloatGrade <= "B" ? "good" : result.bufferbloatGrade <= "C" ? "warn" : "bad",
+                },
+                { label: "ISP", value: result.ispLocation.ispHint ?? "not identified", mono: false },
+                { label: "Masked IP", value: result.ispLocation.ipMasked },
+                { label: "Approx. area", value: approxArea, mono: false },
+                {
+                  label: "Test server",
+                  value: `${result.server.chosen.provider}${result.server.chosen.edgeCode ? ` · ${result.server.chosen.edgeCode}` : ""}`,
+                  mono: false,
+                },
+              ]}
+            />
+            <p className="text-[12.5px] leading-relaxed text-muted-foreground">
+              Location is derived from your IP's routing region — it describes the network, not your
+              address. The IP is masked here and is never included in exports or shared reports.
+            </p>
+          </Section>
 
-          <div className="text-center">
-            <Button variant="outline" onClick={() => setView("results")} className="gap-2">
+          <div className="flex justify-center">
+            <Button
+              size="lg"
+              onClick={() => setView("results")}
+              className="h-11 gap-2 px-7 text-[14px] transition-transform active:scale-[0.98]"
+            >
               View Complete Internet Analysis <ArrowRight className="size-4" />
             </Button>
           </div>
@@ -260,8 +292,11 @@ export default function App() {
     <SidebarProvider>
       <AppSidebar view={view} onNavigate={setView} lowData={lowData} onLowData={setLowData} testing={running} />
       <SidebarInset className="min-w-0">
+        {/* Right-side noise-gradient backdrop for the whole workspace. Fixed,
+            behind content (z-0); page content sits above via z-10. */}
+        <div className="site-noise" aria-hidden="true" />
         <AppHeader />
-        <main id="main" className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6">
+        <main id="main" className="np-container relative z-10 flex-1 py-10 sm:py-12">
           <Suspense fallback={<div className="py-16 text-center text-sm text-muted-foreground">Loading…</div>}>
           {view === "speed" && speedPage}
           {view === "results" && (
@@ -300,6 +335,9 @@ export default function App() {
           {view === "calculator" && <CalculatorPage />}
           {view === "guides" && <GuidesPage />}
           {view === "faq" && <FaqPage />}
+          {(view === "areapulse" || view === "planreality" || view === "reports") && (
+            <UpcomingPage page={view} onNavigate={setView} />
+          )}
           </Suspense>
         </main>
         <NpFooter onNavigate={setView} onMethodology={() => result && setShowMethod(true)} />
