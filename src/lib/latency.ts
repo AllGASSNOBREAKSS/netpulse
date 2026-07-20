@@ -5,18 +5,24 @@
  */
 import { getServer } from "./servers";
 
+const PROBE_TIMEOUT_MS = 5000;
+
 /** One latency probe against the active (or given) server. */
-export async function pingOnce(serverId?: string): Promise<number | null> {
+export async function pingOnce(serverId?: string, timeoutMs = PROBE_TIMEOUT_MS): Promise<number | null> {
   const server = getServer(serverId);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   const t0 = performance.now();
   try {
-    const res = await fetch(server.downPath(0), { cache: "no-store" });
+    const res = await fetch(server.downPath(0), { cache: "no-store", signal: ctrl.signal });
     if (!res.ok) return null;
     // Drain the (empty) body so timing reflects a complete round-trip.
     await res.arrayBuffer();
     return performance.now() - t0;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 

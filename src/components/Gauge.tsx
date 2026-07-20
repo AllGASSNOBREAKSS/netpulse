@@ -90,13 +90,15 @@ export function Gauge({
     }
   }, [liveMbps, active, done, finalMbps]);
 
-  // Reset when a new run begins.
+  // Reset when a new run begins (deferred a frame to keep the effect pure).
   useEffect(() => {
-    if (waiting && !active && !done) {
+    if (!(waiting && !active && !done)) return;
+    const id = requestAnimationFrame(() => {
       peakRef.current = 0;
       setMax(240);
       physics.current.target = 0;
-    }
+    });
+    return () => cancelAnimationFrame(id);
   }, [waiting, active, done]);
 
   // Spring loop (skipped under reduced motion).

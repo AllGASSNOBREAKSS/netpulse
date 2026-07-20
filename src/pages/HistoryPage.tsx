@@ -39,10 +39,11 @@ export function HistoryPage({
 }) {
   const [range, setRange] = useState<RangeKey>("all");
 
+  const [mountedAt] = useState(() => Date.now());
   const rows = useMemo(() => {
-    const cutoff = Date.now() - RANGES[range];
+    const cutoff = mountedAt - RANGES[range];
     return history.filter((h) => h.ts >= cutoff);
-  }, [history, range]);
+  }, [history, range, mountedAt]);
 
   const stats = useMemo(() => {
     if (!rows.length) return null;

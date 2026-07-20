@@ -31,7 +31,9 @@ function saveSession(s: FixSession) {
   try {
     const all = loadSessions().filter((x) => x.id !== s.id);
     localStorage.setItem(KEY, JSON.stringify([s, ...all].slice(0, 20)));
-  } catch {}
+  } catch {
+      /* clipboard unavailable */
+    }
 }
 
 const PHASE_SHORT: Partial<Record<Phase, string>> = {
@@ -55,7 +57,7 @@ export function FixMyInternet() {
   const [outcomes, setOutcomes] = useState<StepOutcome[]>([]);
   const [current, setCurrent] = useState<FixStep | null>(null);
   const [picking, setPicking] = useState(false);
-  const sessionId = useRef<string>("");
+  const [sessionId, setSessionId] = useState("");
   const running = useRef(false);
 
   const doneIds = outcomes.map((o) => o.stepId);
@@ -82,14 +84,14 @@ export function FixMyInternet() {
 
   const persist = useCallback((base: Snapshot, outs: StepOutcome[]) => {
     const session: FixSession = {
-      id: sessionId.current,
+      id: sessionId,
       startedAt: base.timestamp,
       baseline: base,
       outcomes: outs,
       conclusion: conclude(base, outs),
     };
     saveSession(session);
-  }, []);
+  }, [sessionId]);
 
   const startBaseline = useCallback(async () => {
     if (running.current) return;
@@ -99,7 +101,7 @@ export function FixMyInternet() {
     try {
       const r = await runQuick();
       const base = snapshot(r);
-      sessionId.current = `fix-${r.timestamp}`;
+      setSessionId(`fix-${r.timestamp}`);
       setBaseline(base);
       setCurrent(recommendStep(base, []));
       setStage("baseline_done");
@@ -134,7 +136,7 @@ export function FixMyInternet() {
   };
 
   const session: FixSession | null = baseline
-    ? { id: sessionId.current, startedAt: baseline.timestamp, baseline, outcomes, conclusion }
+    ? { id: sessionId, startedAt: baseline.timestamp, baseline, outcomes, conclusion }
     : null;
 
   return (

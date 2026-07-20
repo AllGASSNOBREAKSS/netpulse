@@ -22,7 +22,9 @@ export function ThemeToggle() {
     document.documentElement.classList.toggle("dark", next);
     try {
       localStorage.setItem(THEME_KEY, next ? "dark" : "light");
-    } catch {}
+    } catch {
+    /* localStorage unavailable */
+  }
     listeners.forEach((l) => l());
   }, []);
 

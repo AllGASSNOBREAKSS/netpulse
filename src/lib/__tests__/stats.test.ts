@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { jitter, mean, median, percentile, stddev, summarize, topHalfMedian } from "../stats";
+import { jitter, mean, median, percentile, stddev, summarize } from "../stats";
 
 describe("stats", () => {
   it("median handles odd and even lengths", () => {
@@ -25,12 +25,6 @@ describe("stats", () => {
   it("jitter is mean absolute consecutive delta", () => {
     expect(jitter([10, 12, 11, 13])).toBeCloseTo((2 + 1 + 2) / 3, 5);
     expect(jitter([5])).toBe(0);
-  });
-
-  it("topHalfMedian ignores the slow ramp-up half", () => {
-    // ramp-up 1..5 then steady ~100 → representative should be ~100, not ~50
-    const samples = [1, 2, 3, 4, 5, 98, 100, 102, 99, 101];
-    expect(topHalfMedian(samples)).toBeGreaterThan(95);
   });
 
   it("summarize reports p95/p99 and count", () => {

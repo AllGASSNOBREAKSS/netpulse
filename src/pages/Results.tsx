@@ -85,7 +85,7 @@ export function ResultsPage({
           <h1 className="font-display text-2xl font-extrabold italic">Complete Analysis</h1>
           <p className="text-sm text-muted-foreground">
             {new Date(result.timestamp).toLocaleString()} · {result.server.chosen.provider}{" "}
-            {result.server.chosen.city ?? ""} · {result.dataUsedMB.toFixed(0)} MB measured
+            {result.server.chosen.edgeCode ?? ""} · {result.dataUsedMB.toFixed(0)} MB measured
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -247,8 +247,8 @@ export function ResultsPage({
               ["ASN", result.ispLocation.asn?.split(" ")[0] ?? "unknown"],
               ["IP version", result.ispLocation.ipFamily],
               ["Masked IP", result.ispLocation.ipMasked],
-              ["Server", `${result.server.chosen.provider} ${result.server.chosen.city ?? ""}`],
-              ["Distance", result.server.chosen.approxDistanceKm != null ? `~${result.server.chosen.approxDistanceKm} km` : "unknown"],
+              ["Server", `${result.server.chosen.provider}${result.server.chosen.edgeCode ? ` · edge ${result.server.chosen.edgeCode}` : ""}`],
+              ["Availability", `${Math.round(result.server.chosen.availability * 100)}% of probes answered`],
               ["Duration", `${(result.durationMs / 1000).toFixed(1)} s`],
               ["Data moved", `${result.dataUsedMB.toFixed(0)} MB`],
               ["Raw events", String(result.samples.length)],

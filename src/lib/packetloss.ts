@@ -40,10 +40,13 @@ export async function probePacketLoss(timeoutMs = 6000): Promise<PacketLoss> {
   const start = performance.now();
 
   const result = await new Promise<TriState>((resolve) => {
+    let settled = false;
     const done = (state: TriState) => {
-      try {
-        pc.close();
-      } catch {}
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      // close() is idempotent for an RTCPeerConnection created above.
+      pc.close();
       resolve(state);
     };
     const timer = setTimeout(() => done(types.has("srflx") ? "yes" : types.size ? "no" : "unknown"), timeoutMs);
@@ -51,7 +54,6 @@ export async function probePacketLoss(timeoutMs = 6000): Promise<PacketLoss> {
     pc.onicecandidate = (e) => {
       if (!e.candidate) {
         // Gathering finished.
-        clearTimeout(timer);
         done(types.has("srflx") ? "yes" : "no");
         return;
       }
@@ -63,7 +65,6 @@ export async function probePacketLoss(timeoutMs = 6000): Promise<PacketLoss> {
     };
     pc.onicegatheringstatechange = () => {
       if (pc.iceGatheringState === "complete") {
-        clearTimeout(timer);
         done(types.has("srflx") ? "yes" : "no");
       }
     };

@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { pingOnce } from "../lib/engine";
+import { Search } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { maskIp } from "../lib/ip";
-import { coloDistanceKm, fetchMeta, type NetworkMeta } from "../lib/servers";
+import { lookupNetworkIdentity, type NetworkIdentity } from "../lib/networkIdentity";
 
 /* ============================================================================
    Latency Monitor — real continuous probes, start/stop, live stats.
@@ -103,19 +106,33 @@ function Stat({ label, value, accent }: { label: string; value: string; accent?:
 /* ============================================================================
    Connection & Privacy — neutral facts about what the outside world sees.
    These are properties of every internet connection, not vulnerabilities.
-   Public IP is masked by default; reveal is a deliberate user action.
+   Auto section uses only the measurement provider's trace (already contacted
+   for tests). The ISP/area lookup is opt-in and clearly disclosed.
    ============================================================================ */
 type TraceInfo = Record<string, string>;
 
+function PrivacyRow({ k, v, action }: { k: string; v: string; action?: React.ReactNode }) {
+  return (
+    <div className="flex items-baseline justify-between gap-6 py-1.5">
+      <dt className="shrink-0 text-[13px] text-muted-foreground">{k}</dt>
+      <dd className="flex min-w-0 items-baseline gap-2 text-right font-mono text-[13.5px] font-medium">
+        <span className="truncate" title={v}>{v}</span>
+        {action}
+      </dd>
+    </div>
+  );
+}
+
 export function ConnectionPrivacy() {
   const [trace, setTrace] = useState<TraceInfo | null>(null);
-  const [meta, setMeta] = useState<NetworkMeta | null>(null);
   const [failed, setFailed] = useState(false);
   const [revealIp, setRevealIp] = useState(false);
+  const [identity, setIdentity] = useState<NetworkIdentity | null>(null);
+  const [lookupState, setLookupState] = useState<"idle" | "loading" | "error">("idle");
 
   useEffect(() => {
     let cancelled = false;
-    const traceP = fetch("https://speed.cloudflare.com/cdn-cgi/trace")
+    fetch("https://speed.cloudflare.com/cdn-cgi/trace", { cache: "no-store" })
       .then((r) => r.text())
       .then((t) => {
         if (cancelled) return;
@@ -125,111 +142,122 @@ export function ConnectionPrivacy() {
           if (k && v) info[k] = v;
         }
         setTrace(info);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
       });
-    void fetchMeta(undefined).then((m) => {
-      if (!cancelled) setMeta(m);
-    });
-    traceP.catch(() => {
-      if (!cancelled) setFailed(true);
-    });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const rawIp = meta?.clientIp || trace?.ip || "";
+  const runLookup = async () => {
+    setLookupState("loading");
+    try {
+      setIdentity(await lookupNetworkIdentity());
+      setLookupState("idle");
+    } catch {
+      setLookupState("error");
+    }
+  };
+
+  const rawIp = trace?.ip ?? "";
   const ipDisplay = rawIp ? (revealIp ? rawIp : maskIp(rawIp)) : failed ? "unavailable" : "…";
-  const dist = coloDistanceKm(meta);
+  const pend = failed ? "unavailable" : "…";
 
   return (
-    <div className="panel">
-      <h1 className="panel__title">Connection &amp; Privacy</h1>
-      <p className="panel__sub">
-        What the outside world can see about your connection right now — read live from
-        Cloudflare's edge view of your request. These are normal properties of every internet
-        connection, <strong>not</strong> vulnerabilities.
-      </p>
+    <div className="mx-auto max-w-3xl space-y-6">
+      <div className="space-y-1">
+        <h1 className="text-2xl font-bold tracking-tight">Connection &amp; Privacy</h1>
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          What the outside world can see about your connection right now. These are normal
+          properties of every internet connection, <strong>not</strong> vulnerabilities.
+        </p>
+      </div>
 
-      <h2 className="panel__h2">Your connection</h2>
-      <div className="stat-row">
-        <div className="stat">
-          <div className="stat__label">public IP</div>
-          <div className="stat__value">{ipDisplay}</div>
-          {rawIp && (
-            <button className="stat__reveal" onClick={() => setRevealIp((v) => !v)}>
-              {revealIp ? "mask" : "reveal"}
-            </button>
+      <Card>
+        <CardHeader className="pb-1">
+          <CardTitle className="text-[15px]">Public internet identity</CardTitle>
+          <CardDescription>
+            Read from the measurement provider's echo of your own request — no extra parties are
+            contacted, nothing is stored.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <dl className="divide-y divide-border/60">
+            <PrivacyRow
+              k="Public IP"
+              v={ipDisplay}
+              action={
+                rawIp ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-6 px-2 text-[10px] uppercase tracking-wider"
+                    onClick={() => setRevealIp((x) => !x)}
+                  >
+                    {revealIp ? "mask" : "reveal"}
+                  </Button>
+                ) : undefined
+              }
+            />
+            <PrivacyRow k="Serving edge" v={trace?.colo ?? pend} />
+            <PrivacyRow k="TLS version" v={trace?.tls ?? pend} />
+            <PrivacyRow k="HTTP version" v={trace?.http ?? pend} />
+            <PrivacyRow k="Cloudflare WARP" v={trace ? (trace.warp === "on" ? "on" : "off") : pend} />
+          </dl>
+          <p className="mt-3 text-[12.5px] leading-relaxed text-muted-foreground">
+            Every site you visit already sees your public IP — that's how the internet routes
+            replies. NetPulse masks it by default so a screenshot or screen-share doesn't leak it.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-1">
+          <CardTitle className="text-[15px]">ISP &amp; approximate area</CardTitle>
+          <CardDescription>
+            Optional lookup via ipwho.is. Running it discloses your public IP to that service, so
+            it only happens when you ask — results are registry estimates, never a street address,
+            and are not saved to history or exports.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {identity ? (
+            <dl className="divide-y divide-border/60">
+              <PrivacyRow k="ISP" v={identity.isp ?? "unknown"} />
+              <PrivacyRow k="ASN" v={identity.asn ?? "unknown"} />
+              <PrivacyRow k="Approx. area" v={[identity.city, identity.region, identity.country].filter(Boolean).join(", ") || "unknown"} />
+              <PrivacyRow k="IP family" v={identity.ipFamily} />
+              <PrivacyRow k="Source" v={identity.source} />
+            </dl>
+          ) : (
+            <div className="flex flex-wrap items-center gap-3">
+              <Button size="sm" onClick={() => void runLookup()} disabled={lookupState === "loading"} className="gap-1.5">
+                <Search className="size-3.5" />
+                {lookupState === "loading" ? "Looking up…" : "Run optional lookup"}
+              </Button>
+              {lookupState === "error" && (
+                <span className="text-[12.5px] text-status-warn">Lookup failed or timed out — try again.</span>
+              )}
+            </div>
           )}
-        </div>
-        <Stat label="ISP" value={meta?.org ?? (failed ? "—" : "…")} />
-        <Stat label="ASN" value={meta?.asn != null ? `AS${meta.asn}` : failed ? "—" : "…"} />
-        <Stat label="your location" value={meta?.city ? `${meta.city}, ${meta.region ?? ""}`.replace(/, $/, "") : "…"} />
-        <Stat label="IP version" value={meta?.ipFamily ?? "…"} />
-      </div>
+        </CardContent>
+      </Card>
 
-      <h2 className="panel__h2">Test server &amp; route</h2>
-      <div className="stat-row">
-        <Stat label="edge (colo)" value={meta?.coloCity ? `${meta.coloCity} (${meta.colo})` : trace?.colo ?? "…"} />
-        <Stat label="distance" value={dist != null ? `~${dist} km` : "—"} />
-        <Stat label="TLS" value={trace?.tls ?? (failed ? "—" : "…")} />
-        <Stat label="HTTP" value={trace?.http ?? (failed ? "—" : "…")} />
-        <Stat label="Cloudflare WARP" value={trace ? (trace.warp === "on" ? "on" : "off") : failed ? "—" : "…"} />
-      </div>
-
-      <p className="panel__note">
-        ISP, ASN and location come from Cloudflare's edge (`/meta`) — the same source
-        speed.cloudflare.com uses. Location is approximate and reflects your network's routing
-        region, often an ISP point of presence rather than your street address. Every site you
-        visit already sees your public IP; NetPulse masks it by default so a screenshot doesn't
-        leak it, and nothing on this page is sent anywhere or stored.
-      </p>
-
-      <h2 className="panel__h2">Planned checks (not yet available)</h2>
-      <div className="soon-grid">
-        <Soon title="Password breach check" what="Check whether your email appears in known data breaches — hashed lookups, nothing stored." />
-        <Soon title="Router health" what="Detect router model + firmware age and flag known CVEs. Needs the companion app — browsers can't reach your router." />
-        <Soon title="DNS security" what="Test whether your DNS is encrypted (DoH/DoT) and who actually answers your lookups." />
-        <Soon title="ISP outage radar" what="See whether your provider has reported problems in your area right now." />
-      </div>
-    </div>
-  );
-}
-
-/* ============================================================================
-   Devices — honest: a browser cannot enumerate LAN devices. Explain,
-   and show the plan.
-   ============================================================================ */
-export function Devices() {
-  return (
-    <div className="panel">
-      <h1 className="panel__title">Devices</h1>
-      <p className="panel__sub">Who's on your Wi-Fi, and how much of it they're using.</p>
-
-      <div className="honest">
-        <strong>Straight answer:</strong> a web page is sandboxed — it cannot scan your network,
-        list connected devices, or read router tables. Any website claiming to show "devices on
-        your Wi-Fi" from the browser alone is guessing. This page will light up when the
-        NetPulse companion app ships; until then we'd rather show you nothing than show you
-        fiction.
-      </div>
-
-      <h2 className="panel__h2">What this page will do (planned)</h2>
-      <div className="soon-grid">
-        <Soon title="Device list" what="Every device on your network — phones, TVs, consoles, unknown guests — with names and vendors." />
-        <Soon title="Intruder alert" what="A device you've never seen joins your Wi-Fi → you get a notification." />
-        <Soon title="Per-device usage" what="See which device is eating your bandwidth in real time." />
-        <Soon title="Kick & block" what="One tap to boot a freeloader off your network (router-dependent)." />
-      </div>
-    </div>
-  );
-}
-
-function Soon({ title, what }: { title: string; what: string }) {
-  return (
-    <div className="soon">
-      <div className="soon__badge">planned</div>
-      <div className="soon__title">{title}</div>
-      <div className="soon__what">{what}</div>
+      <Card>
+        <CardHeader className="pb-1">
+          <CardTitle className="text-[15px]">Data handling</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <dl className="divide-y divide-border/60">
+            <PrivacyRow k="Backend / accounts" v="none — fully client-side" />
+            <PrivacyRow k="Analytics / trackers" v="none" />
+            <PrivacyRow k="Test history" v="localStorage on this device only" />
+            <PrivacyRow k="Exports & shared reports" v="masked IP only, never the full address" />
+          </dl>
+        </CardContent>
+      </Card>
     </div>
   );
 }

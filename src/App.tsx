@@ -37,7 +37,9 @@ function loadHistory(): HistoryEntry[] {
 function saveHistory(entries: HistoryEntry[]) {
   try {
     localStorage.setItem(HISTORY_KEY, JSON.stringify(entries.slice(0, 100)));
-  } catch {}
+  } catch {
+    /* localStorage unavailable */
+  }
 }
 
 const PHASE_LABEL: Record<Phase, string> = {
@@ -120,7 +122,7 @@ export default function App() {
         score: v.score,
         dataMB: r.dataUsedMB,
         isp: r.ispLocation.ispHint ?? undefined,
-        server: `${r.server.chosen.provider} ${r.server.chosen.city ?? ""}`.trim(),
+        server: `${r.server.chosen.provider}${r.server.chosen.edgeCode ? ` ${r.server.chosen.edgeCode}` : ""}`.trim(),
         confidence: r.confidence.score,
       };
       setHistory((prev) => {
@@ -235,7 +237,7 @@ export default function App() {
                 ["Idle latency", `${Math.round(result.idlePingMs)} ms`, true],
                 ["Download", `${result.downloadMbps >= 100 ? Math.round(result.downloadMbps) : result.downloadMbps.toFixed(1)} Mbps`, true],
                 ["Upload", `${result.uploadMbps >= 100 ? Math.round(result.uploadMbps) : result.uploadMbps.toFixed(1)} Mbps`, true],
-                ["Test server", `${result.server.chosen.provider} ${result.server.chosen.city ?? ""}`, false],
+                ["Test server", `${result.server.chosen.provider}${result.server.chosen.edgeCode ? ` · edge ${result.server.chosen.edgeCode}` : ""}`, false],
                 ["Bufferbloat", `grade ${result.bufferbloatGrade}`, true],
               ] as [string, string, boolean][]
             ).map(([k, v, mono]) => (
