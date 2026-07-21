@@ -4,7 +4,8 @@
  * duration/data caps, early stopping, and raw sample storage.
  */
 import { getServer } from "./servers";
-import { coefficientOfVariation, max } from "./stats";
+import { DOWNLOAD_WARMUP_BYTES, UPLOAD_WARMUP_BYTES } from "./profiles";
+import { coefficientOfVariation, max, median } from "./stats";
 import { pingOnce } from "./latency";
 import type { ThroughputStats } from "./types";
 
@@ -28,6 +29,82 @@ const SAMPLE_MS = 250; // rolling sample window
 const PROBE_MS = 500; // loaded-latency probe cadence
 const EARLY_STOP_COV = 0.05; // stop once the stable window is this steady
 const EARLY_STOP_MIN_SAMPLES = 12;
+const WARMUP_TIMEOUT_MS = 5000;
+
+let cacheSequence = 0;
+
+function cacheBuster(): string {
+  cacheSequence = (cacheSequence + 1) % Number.MAX_SAFE_INTEGER;
+  return `${Math.round(performance.now() * 1000).toString(36)}-${cacheSequence.toString(36)}`;
+}
+
+function adaptiveRequestBytes(
+  measuredBytes: number,
+  durationMs: number,
+  configuredMaximum: number,
+  direction: "download" | "upload",
+): number {
+  if (measuredBytes <= 0 || durationMs <= 0) return configuredMaximum;
+  const bytesPerSecond = measuredBytes / (durationMs / 1000);
+  const targetSeconds = direction === "download" ? 0.75 : 0.5;
+  const minimum = direction === "download" ? 500_000 : 128_000;
+  return Math.round(Math.min(configuredMaximum, Math.max(minimum, bytesPerSecond * targetSeconds)));
+}
+
+function randomPayload(bytes: number): ArrayBuffer {
+  const body = new ArrayBuffer(bytes);
+  const view = new Uint8Array(body);
+  for (let offset = 0; offset < view.length; offset += 65_536) {
+    crypto.getRandomValues(view.subarray(offset, Math.min(offset + 65_536, view.length)));
+  }
+  return body;
+}
+
+type Warmup = { bytes: number; durationMs: number; succeeded: boolean };
+
+async function downloadWarmup(serverId: string | undefined): Promise<Warmup> {
+  const server = getServer(serverId);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), WARMUP_TIMEOUT_MS);
+  const started = performance.now();
+  try {
+    const response = await fetch(`${server.downPath(DOWNLOAD_WARMUP_BYTES)}&cb=${cacheBuster()}`, {
+      cache: "no-store",
+      signal: ctrl.signal,
+    });
+    if (!response.ok) return { bytes: 0, durationMs: performance.now() - started, succeeded: false };
+    const bytes = (await response.arrayBuffer()).byteLength;
+    return { bytes, durationMs: performance.now() - started, succeeded: bytes > 0 };
+  } catch {
+    return { bytes: 0, durationMs: performance.now() - started, succeeded: false };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function uploadWarmup(serverId: string | undefined): Promise<Warmup> {
+  const server = getServer(serverId);
+  const body = randomPayload(UPLOAD_WARMUP_BYTES);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), WARMUP_TIMEOUT_MS);
+  const started = performance.now();
+  try {
+    const response = await fetch(`${server.upPath}?cb=${cacheBuster()}`, {
+      method: "POST",
+      body,
+      cache: "no-store",
+      signal: ctrl.signal,
+    });
+    const durationMs = performance.now() - started;
+    return response.ok
+      ? { bytes: body.byteLength, durationMs, succeeded: true }
+      : { bytes: 0, durationMs, succeeded: false };
+  } catch {
+    return { bytes: 0, durationMs: performance.now() - started, succeeded: false };
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function waitForProbeCadence(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
@@ -51,6 +128,8 @@ function waitForProbeCadence(ms: number, signal: AbortSignal): Promise<void> {
 async function runLoad(
   opts: LoadOpts,
   direction: "download" | "upload",
+  warmup: Warmup,
+  requestBytes: number,
   worker: (
     signal: AbortSignal,
     count: (n: number) => void,
@@ -64,7 +143,9 @@ async function runLoad(
   let windowBytes = 0;
   let totalBytes = 0;
   let failedRequests = 0;
+  let failedProbes = 0;
   let earlyStopped = false;
+  let durationExpired = false;
   const start = performance.now();
   let windowStartedAt = start;
 
@@ -99,7 +180,7 @@ async function runLoad(
     if (direction === "download") flushDownloadSample();
     const elapsed = performance.now() - start;
     // Early stop: enough steady samples past the minimum duration.
-    if (elapsed > opts.minDurationMs && samples.length >= EARLY_STOP_MIN_SAMPLES) {
+    if (direction === "download" && elapsed > opts.minDurationMs && samples.length >= EARLY_STOP_MIN_SAMPLES) {
       const stable = samples.slice(Math.floor(samples.length / 2));
       if (coefficientOfVariation(stable) < EARLY_STOP_COV) {
         earlyStopped = true;
@@ -119,7 +200,10 @@ async function runLoad(
     if (elapsedMs > 0) recordSample((totalBytes * 8) / elapsedMs / 1000);
   };
 
-  const stopper = setTimeout(() => ctrl.abort(), opts.maxDurationMs);
+  const stopper = setTimeout(() => {
+    durationExpired = true;
+    ctrl.abort();
+  }, opts.maxDurationMs);
   // Start the traffic first. This guarantees that every latency probe below
   // begins while at least one load request is already in flight.
   const load = worker(ctrl.signal, recordBytes, cap, () => {
@@ -135,7 +219,7 @@ async function runLoad(
       if (rtt !== null) {
         rtts.push(rtt);
         opts.onRtt?.(rtt);
-      }
+      } else failedProbes++;
       if (!probing || ctrl.signal.aborted) break;
       await waitForProbeCadence(PROBE_MS, ctrl.signal);
     }
@@ -160,6 +244,11 @@ async function runLoad(
   }
 
   const durationMs = loadEndedAt - start;
+  if (failedRequests >= opts.streams && durationMs < opts.minDurationMs && totalBytes < opts.maxBytes) {
+    throw new Error(
+      `${direction === "download" ? "Download" : "Upload"} measurement failed: every stream stopped before the minimum measurement duration.`,
+    );
+  }
   const mbps = (totalBytes * 8) / durationMs / 1000;
   // Emit the final authoritative result as the last live sample. For uploads,
   // this is also the only defensible peak because fetch exposes no byte-level
@@ -168,20 +257,43 @@ async function runLoad(
 
   return {
     mbps,
-    peakMbps: direction === "download" ? Math.max(mbps, max(samples)) : mbps,
+    peakMbps: Math.max(mbps, max(samples)),
+    medianMbps: samples.length ? median(samples) : mbps,
+    variationPct: Math.round(coefficientOfVariation(samples) * 1000) / 10,
     samples,
     cov: coefficientOfVariation(samples.slice(Math.floor(samples.length / 2))),
     bytes: totalBytes,
+    warmupBytes: warmup.bytes,
+    warmupSucceeded: warmup.succeeded,
+    requestBytes,
     durationMs,
     earlyStopped,
+    stopReason: earlyStopped
+      ? "stable"
+      : durationExpired
+        ? "duration"
+        : totalBytes >= opts.maxBytes
+          ? "data-cap"
+          : failedRequests > 0
+            ? "error"
+            : "completed",
     failedRequests,
+    failedProbes,
     rtts,
   };
 }
 
-export function downloadPhase(opts: LoadOpts) {
+export async function downloadPhase(opts: LoadOpts) {
   const server = getServer(opts.serverId);
-  return runLoad(opts, "download", (signal, count, cap, fail) => {
+  const warmup = await downloadWarmup(opts.serverId);
+  const requestBytes = adaptiveRequestBytes(warmup.bytes, warmup.durationMs, opts.chunkBytes, "download");
+  const measuredOpts = {
+    ...opts,
+    chunkBytes: requestBytes,
+    onBytes: (bytes: number) => opts.onBytes?.(warmup.bytes + bytes),
+  };
+  opts.onBytes?.(warmup.bytes);
+  return runLoad(measuredOpts, "download", warmup, requestBytes, (signal, count, cap, fail) => {
     const workers: Promise<void>[] = [];
     for (let w = 0; w < opts.streams; w++) {
       workers.push(
@@ -189,7 +301,7 @@ export function downloadPhase(opts: LoadOpts) {
           while (!signal.aborted && !cap()) {
             try {
               // Cache-buster query + no-store defeat any intermediary caching.
-              const url = `${server.downPath(opts.chunkBytes)}&cb=${Math.random().toString(36).slice(2)}`;
+              const url = `${server.downPath(requestBytes)}&cb=${cacheBuster()}`;
               const res = await fetch(url, { cache: "no-store", signal });
               if (!res.ok) {
                 fail();
@@ -221,28 +333,37 @@ export function downloadPhase(opts: LoadOpts) {
   });
 }
 
-export function uploadPhase(opts: LoadOpts) {
+export async function uploadPhase(opts: LoadOpts) {
   const server = getServer(opts.serverId);
+  const warmup = await uploadWarmup(opts.serverId);
+  const requestBytes = adaptiveRequestBytes(warmup.bytes, warmup.durationMs, opts.chunkBytes, "upload");
   // Non-personal payload generated in memory. Web Crypto limits each call to
-  // 65,536 bytes, so fill the request body in chunks rather than leaving most
-  // of it zeroed and potentially compressible.
-  const body = new Uint8Array(opts.chunkBytes);
-  for (let offset = 0; offset < body.length; offset += 65_536) {
-    crypto.getRandomValues(body.subarray(offset, Math.min(offset + 65_536, body.length)));
-  }
-  return runLoad(opts, "upload", (signal, count, cap, fail) => {
+  // 65,536 bytes, so fill every chunk rather than leaving compressible zeroes.
+  const body = randomPayload(requestBytes);
+  const measuredOpts = {
+    ...opts,
+    chunkBytes: requestBytes,
+    onBytes: (bytes: number) => opts.onBytes?.(warmup.bytes + bytes),
+  };
+  opts.onBytes?.(warmup.bytes);
+  return runLoad(measuredOpts, "upload", warmup, requestBytes, (signal, count, cap, fail) => {
     const workers: Promise<void>[] = [];
     for (let w = 0; w < opts.streams; w++) {
       workers.push(
         (async () => {
           while (!signal.aborted && !cap()) {
             try {
-              const res = await fetch(server.upPath, { method: "POST", body, cache: "no-store", signal });
+              const res = await fetch(`${server.upPath}?cb=${cacheBuster()}`, {
+                method: "POST",
+                body,
+                cache: "no-store",
+                signal,
+              });
               if (!res.ok) {
                 fail();
                 break;
               }
-              count(opts.chunkBytes);
+              count(requestBytes);
             } catch {
               if (!signal.aborted) fail();
               break;

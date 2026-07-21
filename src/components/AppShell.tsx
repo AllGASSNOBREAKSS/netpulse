@@ -2,6 +2,7 @@ import {
   Activity,
   Archive,
   BookOpen,
+  Check,
   CircleHelp,
   Gauge,
   CodeXml,
@@ -63,10 +64,11 @@ import {
   SidebarRail,
   SidebarSeparator,
   SidebarTrigger,
+  useSidebar,
 } from "./ui/sidebar";
 import { Switch } from "./ui/switch";
 
-export type AppView = "speed" | "blackbox" | "history" | "connection";
+export type AppView = "speed" | "fix" | "blackbox" | "area" | "history" | "plan" | "connection";
 
 type NavItem = {
   label: string;
@@ -80,21 +82,21 @@ const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
     label: "Test",
     items: [
       { label: "Speed Test", icon: Gauge, view: "speed" },
-      { label: "Fix My Internet", icon: Wrench, planned: "Guided diagnostics arrive in the next implementation phase." },
+      { label: "Fix My Internet", icon: Wrench, view: "fix" },
     ],
   },
   {
     label: "Monitor",
     items: [
       { label: "Connection Black Box", icon: Activity, view: "blackbox" },
-      { label: "Area Pulse", icon: RadioTower, planned: "Regional evidence requires honest data sources before launch." },
+      { label: "Area Pulse", icon: RadioTower, view: "area" },
     ],
   },
   {
     label: "Insights",
     items: [
       { label: "History", icon: History, view: "history" },
-      { label: "Plan Reality Check", icon: ReceiptText, planned: "Plan comparison will be integrated with saved history." },
+      { label: "Plan Reality Check", icon: ReceiptText, view: "plan" },
       { label: "Saved Reports", icon: Archive, planned: "Reports remain local until the workflow is implemented." },
     ],
   },
@@ -117,8 +119,11 @@ const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
 
 const VIEW_TITLES: Record<AppView, string> = {
   speed: "Speed Test",
+  fix: "Fix My Internet",
   blackbox: "Connection Black Box",
+  area: "Area Pulse",
   history: "History",
+  plan: "Plan Reality Check",
   connection: "Connection Details",
 };
 
@@ -167,16 +172,11 @@ export function AppShell({
 
   return (
     <SidebarProvider open={sidebarOpen} onOpenChange={setOpen}>
+      <a className="skip-link" href="#main-content">Skip to main content</a>
       <ArcConnectionStatus className="arc-connection-status" />
       <Sidebar collapsible="icon" variant="sidebar" className="border-sidebar-border/80">
         <SidebarHeader className="px-3 py-4">
-          <button className="brand-lockup" onClick={() => onViewChange("speed")} aria-label="Open Speed Test">
-            <span className="brand-mark" aria-hidden="true">np</span>
-            <span className="brand-copy">
-              <span>net<span>pulse</span></span>
-              <small>internet health console</small>
-            </span>
-          </button>
+          <SidebarBrandButton onViewChange={onViewChange} />
         </SidebarHeader>
         <SidebarSeparator />
         <SidebarContent>
@@ -185,26 +185,7 @@ export function AppShell({
               <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
-                  {group.items.map((item) => {
-                    const active = item.view === view;
-                    const title = item.planned ? `${item.label} — ${item.planned}` : item.label;
-                    return (
-                      <SidebarMenuItem key={item.label}>
-                        <SidebarMenuButton
-                          tooltip={title}
-                          isActive={active}
-                          disabled={!item.view}
-                          aria-disabled={!item.view}
-                          onClick={() => item.view && onViewChange(item.view)}
-                          className="h-9"
-                        >
-                          <item.icon aria-hidden="true" />
-                          <span>{item.label}</span>
-                        </SidebarMenuButton>
-                        {item.planned && <SidebarMenuBadge className="text-[9px]">NEXT</SidebarMenuBadge>}
-                      </SidebarMenuItem>
-                    );
-                  })}
+                  {group.items.map((item) => <SidebarRouteItem key={item.label} item={item} active={item.view === view} onViewChange={onViewChange} />)}
                 </SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>
@@ -216,12 +197,7 @@ export function AppShell({
             <SidebarMenuItem>
               <SettingsSheet lowData={lowData} onLowDataChange={onLowDataChange} />
             </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton tooltip="About NetPulse" onClick={() => onViewChange("connection")}>
-                <Info aria-hidden="true" />
-                <span>About</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
+            <SidebarRouteItem item={{ label: "About", icon: Info, view: "connection" }} active={view === "connection"} onViewChange={onViewChange} />
             <SidebarMenuItem>
               <SidebarMenuButton tooltip="Open NetPulse on GitHub" asChild>
                 <a href="https://github.com/bbarc0de/netpulse" target="_blank" rel="noreferrer">
@@ -235,17 +211,25 @@ export function AppShell({
         <SidebarRail />
       </Sidebar>
 
-      <SidebarInset className="min-w-0 bg-background">
+      <SidebarInset id="main-content" className="min-w-0 bg-background" tabIndex={-1}>
         <header className="app-header">
           <div className="app-header__start">
             <SidebarTrigger aria-label="Toggle navigation" />
-            <div>
-              <p className="app-header__eyebrow">NetPulse diagnostics</p>
+            <div className="app-header__identity">
+              <button className="app-header__brand" onClick={() => onViewChange("speed")} aria-label="NetPulse home">
+                net<span>pulse</span><small> diagnostics</small>
+              </button>
               <h1>{VIEW_TITLES[view]}</h1>
             </div>
           </div>
           <div className="app-header__actions">
-            <Badge variant="outline" className={online ? "status-online" : "status-offline"}>
+            <Badge
+              variant="outline"
+              className={online ? "status-online" : "status-offline"}
+              role="status"
+              aria-live="polite"
+              aria-label={`Browser network status: ${online ? "online" : "offline"}`}
+            >
               {online ? <Wifi aria-hidden="true" /> : <WifiOff aria-hidden="true" />}
               {online ? "Online" : "Offline"}
             </Badge>
@@ -266,11 +250,62 @@ export function AppShell({
             <SettingsSheet lowData={lowData} onLowDataChange={onLowDataChange} triggerOnly />
           </div>
         </header>
-        <main id="main-content" className="app-content" tabIndex={-1}>
+        <div className="app-content">
           {children}
-        </main>
+        </div>
       </SidebarInset>
     </SidebarProvider>
+  );
+}
+
+function SidebarBrandButton({ onViewChange }: { onViewChange: (view: AppView) => void }) {
+  const { isMobile, setOpenMobile } = useSidebar();
+  const navigate = () => {
+    onViewChange("speed");
+    if (isMobile) setOpenMobile(false);
+  };
+
+  return (
+    <button className="brand-lockup" onClick={navigate} aria-label="Open Speed Test">
+      <span className="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" role="presentation">
+          <path d="M4 17h5l2.5-7 4.5 14 3.5-10 2 3H28" />
+          <circle cx="4" cy="17" r="1.5" />
+          <circle cx="28" cy="17" r="1.5" />
+        </svg>
+      </span>
+      <span className="brand-copy">
+        <span>net<span>pulse</span></span>
+        <small>internet health console</small>
+      </span>
+    </button>
+  );
+}
+
+function SidebarRouteItem({ item, active, onViewChange }: { item: NavItem; active: boolean; onViewChange: (view: AppView) => void }) {
+  const { isMobile, setOpenMobile } = useSidebar();
+  const title = item.planned ? `${item.label} — Coming later. ${item.planned}` : item.label;
+  const navigate = () => {
+    if (!item.view) return;
+    onViewChange(item.view);
+    if (isMobile) setOpenMobile(false);
+  };
+
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton
+        tooltip={title}
+        isActive={active}
+        disabled={!item.view}
+        aria-disabled={!item.view}
+        onClick={navigate}
+        className="h-9"
+      >
+        <item.icon aria-hidden="true" />
+        <span>{item.label}</span>
+      </SidebarMenuButton>
+      {item.planned && <SidebarMenuBadge className="text-[9px]">LATER</SidebarMenuBadge>}
+    </SidebarMenuItem>
   );
 }
 
@@ -311,7 +346,7 @@ function ThemeItem({
     <DropdownMenuItem onSelect={() => onSelect(value)}>
       <Icon aria-hidden="true" />
       <span className="capitalize">{value}</span>
-      {current === value && <span className="ml-auto text-primary">●</span>}
+      {current === value && <Check className="ml-auto text-primary" aria-label="Selected" />}
     </DropdownMenuItem>
   );
 }
@@ -319,7 +354,7 @@ function ThemeItem({
 function LanguageSelect() {
   return (
     <Select value="en">
-      <SelectTrigger className="language-select" aria-label="Language">
+      <SelectTrigger className="language-select" aria-label="Language selector; English is the only available language in this stage">
         <Languages aria-hidden="true" />
         <SelectValue />
       </SelectTrigger>

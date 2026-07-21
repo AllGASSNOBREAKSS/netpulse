@@ -20,6 +20,9 @@ const worse = (a: BloatGrade, b: BloatGrade): BloatGrade => (a >= b ? a : b);
 export const BLOAT_FORMULA =
   "rise = median(loaded latency) − median(idle latency), computed separately for download and upload. Grade: A <30ms, B <60ms, C <100ms, D <200ms, F ≥200ms. Overall grade is the worse of the two.";
 
+export const STABILITY_FORMULA =
+  "100 minus weighted penalties: loaded-latency spread 30%, spike ratio 30%, worse download/upload throughput variation 20%, failed probes or requests 15%, and test completion 5%. A spike exceeds max(3× idle median, idle median + 150 ms).";
+
 export function computeBufferbloat(idle: Summary, loadedDown: Summary, loadedUp: Summary): Bufferbloat {
   const downloadMs = Math.max(0, loadedDown.median - idle.median);
   const uploadMs = Math.max(0, loadedUp.median - idle.median);
@@ -45,6 +48,9 @@ export function computeStability(
   loadedRtts: number[],
   downloadCov: number,
   uploadCov = 0,
+  failedProbes = 0,
+  failedRequests = 0,
+  testComplete = true,
 ): Stability {
   const sd = stddev(loadedRtts);
   const p95 = percentile(loadedRtts, 95);
@@ -60,8 +66,21 @@ export function computeStability(
   const spikePenalty = Math.min(spikeRatio * 4, 1);
   const throughputCov = Math.max(downloadCov, uploadCov);
   const covPenalty = Math.min(throughputCov / 0.4, 1); // CoV 0.4 = full penalty
+  const signalAttempts = loadedRtts.length + failedProbes + failedRequests;
+  const failureRatio = signalAttempts ? (failedProbes + failedRequests) / signalAttempts : 1;
+  const failurePenalty = Math.min(failureRatio * 3, 1);
+  const completionPenalty = testComplete ? 0 : 1;
 
-  const score = Math.round(100 * (1 - (spreadPenalty * 0.4 + spikePenalty * 0.4 + covPenalty * 0.2)));
+  const score = Math.round(
+    100 *
+      (1 -
+        (spreadPenalty * 0.3 +
+          spikePenalty * 0.3 +
+          covPenalty * 0.2 +
+          failurePenalty * 0.15 +
+          completionPenalty * 0.05)),
+  );
+  const probeAttempts = loadedRtts.length + failedProbes;
 
   return {
     score: Math.max(0, score),
@@ -71,5 +90,9 @@ export function computeStability(
     spikes,
     longestSpikeMs,
     throughputCov: Math.round(throughputCov * 1000) / 1000,
+    successfulProbes: loadedRtts.length,
+    failedProbes,
+    completeness: probeAttempts ? Math.round((loadedRtts.length / probeAttempts) * 1000) / 1000 : 0,
+    formula: STABILITY_FORMULA,
   };
 }

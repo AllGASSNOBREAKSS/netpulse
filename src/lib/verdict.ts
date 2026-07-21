@@ -42,7 +42,16 @@ export function judge(r: TestResult): Verdict {
         r.idlePingMs < 45 && r.idleJitterMs < 12 && r.bufferbloatMs < 80,
         r.idlePingMs < 70,
       ),
-      note: `${Math.round(r.idlePingMs)}ms ping, ${Math.round(r.idleJitterMs)}ms jitter`,
+      note: `${Math.round(r.idlePingMs)} ms idle median · ${Math.round(r.idleJitterMs)} ms jitter · P95 ${Math.round(r.idleLatency.p95)} ms`,
+    },
+    {
+      name: "Casual gaming",
+      grade: g(
+        r.idlePingMs < 45 && r.idleJitterMs < 12,
+        r.idlePingMs < 75 && r.idleJitterMs < 20,
+        r.idlePingMs < 120,
+      ),
+      note: `${Math.round(r.idlePingMs)} ms idle · ${Math.round(r.idleJitterMs)} ms jitter · ${r.stability.score}/100 stability`,
     },
     {
       name: "Gaming while others download",
@@ -52,7 +61,7 @@ export function judge(r: TestResult): Verdict {
     {
       name: "4K streaming",
       grade: g(r.downloadMbps > 50, r.downloadMbps > 25, r.downloadMbps > 15),
-      note: `~${r.downloadMbps > 25 ? Math.floor(r.downloadMbps / 25) : 0} simultaneous 4K streams at 25 Mbps each`,
+      note: `${fmt(r.downloadMbps)} Mbps measured · capacity estimate uses 25 Mbps per stream`,
     },
     {
       name: "Video calls",
@@ -75,21 +84,35 @@ export function judge(r: TestResult): Verdict {
     {
       name: "Livestreaming",
       grade: g(r.uploadMbps > 20 && spikeRatio === 0, r.uploadMbps > 10, r.uploadMbps > 6),
-      note: `${r.uploadMbps.toFixed(1)} Mbps upload`,
+      note: `${r.uploadMbps.toFixed(1)} Mbps upload · ${Math.round(r.loadedUpPingMs)} ms upload-loaded median`,
     },
     {
-      name: "Large uploads / backups",
+      name: "Cloud backups",
       grade: g(r.uploadMbps > 40, r.uploadMbps > 15, r.uploadMbps > 5),
       note: `1 GB in ~${formatDuration(8000 / Math.max(r.uploadMbps, 0.1))}`,
     },
     {
-      name: "Everyday browsing",
+      name: "Large downloads",
+      grade: g(r.downloadMbps > 200, r.downloadMbps > 75, r.downloadMbps > 20),
+      note: `10 GB in ~${formatDuration(80_000 / Math.max(r.downloadMbps, 0.1))} at the measured phase rate`,
+    },
+    {
+      name: "General browsing",
       grade: g(
         r.downloadMbps > 25 && r.idlePingMs < 60,
         r.downloadMbps > 10,
         r.downloadMbps > 3,
       ),
-      note: "pages, apps, music",
+      note: `${fmt(r.downloadMbps)} Mbps down · ${Math.round(r.idlePingMs)} ms idle · ${Math.round(Math.max(r.loadedDownPingMs, r.loadedUpPingMs))} ms loaded`,
+    },
+    {
+      name: "Smart-home usage",
+      grade: g(
+        r.stability.score >= 85 && Math.max(r.loadedDownPingMs, r.loadedUpPingMs) < 120,
+        r.stability.score >= 65 && Math.max(r.loadedDownPingMs, r.loadedUpPingMs) < 200,
+        r.stability.score >= 45,
+      ),
+      note: `${r.stability.score}/100 connection stability · ${Math.round(Math.max(r.loadedDownPingMs, r.loadedUpPingMs))} ms worst loaded median; no devices inspected`,
     },
   ];
 
@@ -116,17 +139,17 @@ export function judge(r: TestResult): Verdict {
   let dontBuy: string | undefined;
   if (r.bufferbloatGrade >= "C") {
     actions.push(
-      "Enable SQM / Smart Queue Management (or QoS) on your router — it directly targets the latency-under-load problem.",
+      "Most likely high-value action: if your router supports SQM / Smart Queue Management, test it — the measured latency increase is consistent with queueing under load.",
     );
     if (r.downloadMbps > 100)
-      dontBuy = "A faster download plan. Your bandwidth is fine — the problem is how your router queues traffic when busy.";
+      dontBuy = "A faster download tier by itself. This run measured ample download capacity and a latency-under-load problem; more capacity does not guarantee better queue control.";
   }
   if (r.idleJitterMs > 15 || r.spikes > 1)
-    actions.push("If you're on Wi-Fi, re-test next to the router or over Ethernet — jitter this high usually means interference or weak signal.");
+    actions.push("Possible local-link instability: compare one Ethernet run with one Wi-Fi run. The browser cannot identify Wi-Fi interference or signal strength directly.");
   if (r.uploadMbps < 5)
     actions.push("Check your plan's advertised upload speed — many cable plans are heavily asymmetric, and this may be all you're paying for.");
   if (r.idlePingMs > 60)
-    actions.push("High base latency: check whether a VPN is on, and whether your connection is DSL/satellite — those set a floor no router can fix.");
+    actions.push("Possible route or access-network latency: repeat without a VPN if one is active, then compare endpoints. This run cannot identify DSL, cable, fiber, or satellite technology.");
   if (actions.length === 0)
     actions.push("Nothing urgent. Save this result as your baseline and re-test when something feels slow — the comparison is the diagnosis.");
 

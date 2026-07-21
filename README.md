@@ -9,16 +9,18 @@ diagnostic against Cloudflare's public speed endpoints — measuring not just ho
 *fast* your connection is, but how it behaves **under load** — then explains in
 plain English what's good, what's wrong, and what to actually do about it.
 
-The signature is an automotive instrument cluster: a 270° speedometer whose
-needle is driven by spring physics, revving on live throughput samples like an
-RPM gauge. The red ring badge is your idle ping, the gear indicator shows the
-test phase (`D3` download, `U2` upload, `N` done), and the fuel bar counts the
-application payload the browser can observe (not protocol overhead).
+The signature is an automotive instrument cluster: a 270° speedometer driven
+only by live throughput samples. A non-overshooting visual filter keeps the
+needle, number, and active color synchronized without changing the measured
+result. The fixed scale uses blue for 0–100 Mbps, yellow for 100–200, orange for
+200–500, and red for 500 Mbps and above; it never rescales during a run. The
+payload bar counts application data the browser can observe, not protocol
+overhead.
 
 ```
-        ⌀ 332 MBPS  [N]        ← needle settles on your measured download
-   (44)              health 79/100
-        ▮▯ ▬▬▬▬▬▬  349 MB     ← data actually moved, byte-counted
+             332 Mbps          ← needle and number move together
+          health 79/100
+         ▬▬▬▬▬▬  349 MB       ← data actually moved, byte-counted
 ```
 
 ---
@@ -49,7 +51,7 @@ A staged pipeline — full detail in **[ENGINE.md](ENGINE.md)**:
 
 | Stage | How |
 | --- | --- |
-| Preflight | Browser, OS, device, tab state, IPv4/IPv6 availability, secure context, **possible** VPN/proxy (heuristic), estimated duration + data |
+| Preflight | Browser, OS, device, tab state, IPv4/IPv6 availability, secure context, explicit Cloudflare WARP signal where reported, other VPN/proxy status **unknown**, estimated duration + data |
 | Server selection | Probes candidates, ranks by median latency + jitter + availability, explains the pick |
 | Idle latency | Timed zero-byte probes (`performance.now()`) → min / median / mean / **P95 / P99** / jitter |
 | Download | **Single- then multi-connection**, cache-busted, no-store; received payload ÷ actual phase time, with timed windows for variation |
@@ -85,10 +87,17 @@ inspectable and exportable as JSON.
 - 🧭 Responsive shadcn/ui dashboard shell with a collapsible desktop sidebar,
   mobile drawer, keyboard navigation, theme controls, and honest disabled states
   for planned workflows
-- 📈 Real-data charts for latency, throughput, idle-versus-loaded latency,
+- 📈 Live and completed real-data charts for latency, throughput, idle-versus-loaded latency,
   stability, and locally saved previous-test comparison
-- 📉 Live latency monitor — continuous 500 ms probes with spike/drop detection,
-  run it while you game or join calls
+- 🛡️ **Connection Black Box** — real long-run HTTPS latency, reachability,
+  controlled DNS, edge, browser-scheduling, and visibility telemetry with
+  deterministic incident grouping, an **I Felt Lag** correlation marker,
+  local retention, raw tables, and privacy-safe support exports. See
+  [BLACKBOX.md](BLACKBOX.md)
+- 📍 **Area Pulse** — fail-closed, privacy-thresholded coarse regional reports,
+  real browser reachability checks, signed official notices, transparent
+  confidence, deletion receipts, and abuse controls. It renders honest list and
+  empty states, never a fake outage map. See [AREA_PULSE.md](AREA_PULSE.md)
 - 🔒 Connection & Privacy panel — public IP (masked by default), nearest edge,
   TLS/HTTP version, and WARP detection; ISP/ASN/approximate area is a separate,
   privacy-disclosed opt-in lookup and is never inferred from the edge code
@@ -97,10 +106,18 @@ inspectable and exportable as JSON.
 - 🎯 Result confidence score with exact per-factor deductions so you know how
   much to trust a run
 - 📤 Methodology & raw-data panel — server candidates, per-run limitations, the
-  full method, and one-click JSON export (raw samples included, public IP never)
+  full method, privacy-safe JSON/CSV exports, and a diagnostic text report
 - 🩺 Activity grades and a written diagnosis with a "don't waste money on" callout
 - 🧾 Local test history (stored in your browser, never uploaded)
-- 🪫 Low-data mode — caps a full test from ~250 MB down to ~40 MB for metered connections
+- 📊 **ISP Plan Reality Check** — local-history medians, peak/off-peak and
+  user-labeled Wi-Fi/Ethernet comparisons, confidence exclusions, loaded
+  latency, and a neutral support report without contractual claims
+- 🛠️ **Fix My Internet** — a deterministic guided workflow with real baseline
+  and A/B measurements, locally saved sessions, evidence/confidence/alternatives
+  for every conclusion, a prioritized retestable fix plan, and privacy-safe
+  reports. See [DIAGNOSTICS.md](DIAGNOSTICS.md)
+- 🪫 Low-data mode — typically ~40 MB instead of ~250 MB; preflight also shows
+  each profile's configured payload ceiling before possible in-flight overshoot
 - 🧪 Unit-tested measurement logic (`npm test`) — see [VALIDATION.md](VALIDATION.md)
 - ♿ Responsive (desktop/tablet/mobile), keyboard-accessible, honors `prefers-reduced-motion`
 
@@ -124,7 +141,12 @@ inspectable and exportable as JSON.
 
 **Docs:** [ENGINE.md](ENGINE.md) (measurement pipeline) ·
 [VALIDATION.md](VALIDATION.md) (test matrix) ·
-[AUDIT.md](AUDIT.md) (codebase honesty audit).
+[AUDIT.md](AUDIT.md) (codebase honesty audit) ·
+[SECURITY_AUDIT.md](SECURITY_AUDIT.md) (threat model and release gates) ·
+[DIAGNOSTICS.md](DIAGNOSTICS.md) (troubleshooting rules) ·
+[BLACKBOX.md](BLACKBOX.md) (long-run observability method) ·
+[AREA_PULSE.md](AREA_PULSE.md) (regional architecture and plan formulas) ·
+[POLICIES.md](POLICIES.md) (policy index and contact).
 
 ## Getting started
 
@@ -143,7 +165,11 @@ npm run build      # outputs to dist/
 npm run preview
 ```
 
-No API keys, no backend, no account — it runs entirely in the browser.
+Core speed testing, history, diagnostics, plan comparison, and Black Box data are
+local-first and require no account. The optional Area Pulse architecture uses
+same-origin Vercel Functions, PostgreSQL, and Cloudflare Turnstile; it fails
+closed and remains unavailable unless every required server control is
+configured. Never put server secrets in `VITE_*` variables.
 
 ## Tech
 
@@ -154,6 +180,11 @@ components · Recharts · SVG · Vitest. Throughput/latency use the Cloudflare s
 packet-loss card uses WebRTC against public STUN servers. Run `npm test` for the
 measurement-logic suite.
 
+Space Grotesk (SIL Open Font License) is bundled for display typography, with
+Geist for body copy and a system monospace stack for technical values. Glonto
+is a commercial font and is not bundled or redistributed without a licensed
+webfont supplied by the project owner.
+
 The engine is modular under `src/lib/` — `preflight`, `servers`, `latency`,
 `throughput`, `grading`, `packetloss`, `confidence`, `scoring`, `stats`, with
 `engine.ts` sequencing them.
@@ -163,12 +194,21 @@ shadcn/ui owns interactive primitives and charts; ARC UI is limited to telemetry
 and status elements so the two systems do not compete for the same primitive.
 Theme and sidebar preferences are stored locally.
 
+## Security and privacy
+
+Read [SECURITY.md](SECURITY.md) before reporting a vulnerability. Operational
+and legal-readiness documents include [PRIVACY.md](PRIVACY.md),
+[TERMS.md](TERMS.md), [ACCEPTABLE_USE.md](ACCEPTABLE_USE.md),
+[TRADEMARKS.md](TRADEMARKS.md), [INCIDENT_RESPONSE.md](INCIDENT_RESPONSE.md),
+[DATABASE_RUNBOOK.md](DATABASE_RUNBOOK.md), and
+[DEPLOYMENT_RUNBOOK.md](DEPLOYMENT_RUNBOOK.md). Policy drafts are explicitly
+subject to qualified legal review; the project does not claim certification or
+perfect security.
+
 ## Roadmap
 
 - **Truth Mode** — test several endpoints and explain why results disagree
-- **Fix My Internet** — guided A/B diagnostics (near router vs. far, Wi-Fi vs. Ethernet, VPN on/off)
 - **Household Stress Lab** — simulate real simultaneous usage and see what breaks first
-- **Connection Black Box** — long-run monitoring with an "I felt lag" marker
 - **ISP Proof Pack** — scheduled peak-hour tests → downloadable evidence report
 
 ## License

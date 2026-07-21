@@ -10,6 +10,10 @@ const base: ConfidenceInputs = {
   loadedUpProbeCount: 10,
   serverAvailable: true,
   serverJitterMs: 4,
+  downloadWarmupSucceeded: true,
+  uploadWarmupSucceeded: true,
+  downloadMinimumDurationMet: true,
+  uploadMinimumDurationMet: true,
   tabForegroundThroughout: true,
   completed: true,
   errors: 0,
@@ -64,5 +68,15 @@ describe("result confidence", () => {
   it("shows the exact penalty applied for a weak factor", () => {
     const c = computeConfidence({ ...base, uploadSamples: [20] });
     expect(c.reasons.find((r) => r.label === "Upload sampling")?.penalty).toBe(6);
+  });
+
+  it("does not treat one upload observation as a variation estimate", () => {
+    const c = computeConfidence({ ...base, uploadSamples: [20] });
+    expect(c.reasons.find((r) => r.label === "Upload consistency")?.ok).toBe(false);
+  });
+
+  it("reports failed transfer warm-ups", () => {
+    const c = computeConfidence({ ...base, downloadWarmupSucceeded: false });
+    expect(c.reasons.find((r) => r.label === "Download warm-up")?.penalty).toBe(4);
   });
 });

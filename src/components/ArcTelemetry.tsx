@@ -2,7 +2,10 @@ import "@arclux/arc-ui/animated-number";
 import "@arclux/arc-ui/connection-status";
 import "@arclux/arc-ui/footer";
 import "@arclux/arc-ui/meter";
+import "@arclux/arc-ui/progress";
 import "@arclux/arc-ui/sparkline";
+import "@arclux/arc-ui/timeline";
+import "@arclux/arc-ui/timeline-item";
 import { createElement, type HTMLAttributes, type ReactNode } from "react";
 
 type ArcBaseProps = HTMLAttributes<HTMLElement> & { children?: ReactNode };
@@ -78,6 +81,28 @@ export function ArcSparkline({
 
 export function ArcConnectionStatus({ className, ...props }: ArcBaseProps) {
   return createElement("arc-connection-status", { class: className, ...props });
+}
+
+export function ArcProgress({
+  value,
+  label,
+  className,
+  ...props
+}: ArcBaseProps & { value: number; label: string }) {
+  return createElement("arc-progress", { value, label, class: className, ...props });
+}
+
+export function ArcTimeline({ className, ...props }: ArcBaseProps) {
+  return createElement("arc-timeline", { class: className, ...props });
+}
+
+export function ArcTimelineItem({
+  heading,
+  date,
+  className,
+  ...props
+}: ArcBaseProps & { heading: string; date?: string }) {
+  return createElement("arc-timeline-item", { heading, date, class: className, ...props });
 }
 
 export function ArcFooter({ compact = true, border = true, className, ...props }: ArcBaseProps & { compact?: boolean; border?: boolean }) {

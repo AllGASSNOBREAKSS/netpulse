@@ -18,6 +18,7 @@ import { getServer, selectServer } from "./servers";
 import { summarize } from "./stats";
 import { downloadPhase, uploadPhase } from "./throughput";
 import { probePacketLoss } from "./packetloss";
+import { PROFILES } from "./profiles";
 import {
   SCHEMA_VERSION,
   type EngineCallbacks,
@@ -29,31 +30,6 @@ import {
 
 export type { Phase, TestConfig, TestResult, Sample, EngineCallbacks } from "./types";
 export { pingOnce } from "./latency";
-
-/**
- * Per-mode measurement parameters. `dlStreams`/`ulStreams` are read by the
- * speedometer to label the phase "gear" with the stream count that runs.
- */
-export const PROFILES = {
-  full: {
-    idleProbes: 14,
-    serverProbes: 6,
-    single: { streams: 1, chunkBytes: 25_000_000, minMs: 3000, maxMs: 6000, maxBytes: 80_000_000 },
-    multi: { streams: 4, chunkBytes: 25_000_000, minMs: 4000, maxMs: 9000, maxBytes: 220_000_000 },
-    upload: { streams: 3, chunkBytes: 2_000_000, minMs: 4000, maxMs: 8000, maxBytes: 70_000_000 },
-    dlStreams: 4,
-    ulStreams: 3,
-  },
-  lowData: {
-    idleProbes: 10,
-    serverProbes: 4,
-    single: { streams: 1, chunkBytes: 8_000_000, minMs: 2000, maxMs: 4000, maxBytes: 12_000_000 },
-    multi: { streams: 2, chunkBytes: 8_000_000, minMs: 2000, maxMs: 5000, maxBytes: 22_000_000 },
-    upload: { streams: 1, chunkBytes: 1_000_000, minMs: 2000, maxMs: 4000, maxBytes: 8_000_000 },
-    dlStreams: 2,
-    ulStreams: 1,
-  },
-} as const;
 
 type TraceInfo = Record<string, string>;
 async function fetchTrace(serverId: string): Promise<TraceInfo | null> {
@@ -143,7 +119,7 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
       chunkBytes: P.multi.chunkBytes,
       onThroughput: (mbps) => push({ phase: "download_multi", mbps, streamMode: "multi" }),
       onRtt: (rtt) => push({ phase: "download_multi", rttMs: rtt }),
-      onBytes: (bytes) => cb.onBytes?.(single.bytes + bytes),
+      onBytes: (bytes) => cb.onBytes?.(payloadBytes(single) + bytes),
     });
     const loadedDownRtts = [...single.rtts, ...multi.rtts];
     const loadedDown = summarize(loadedDownRtts);
@@ -167,7 +143,7 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
       chunkBytes: P.upload.chunkBytes,
       onThroughput: (mbps) => push({ phase: "upload", mbps, streamMode: "multi" }),
       onRtt: (rtt) => push({ phase: "upload", rttMs: rtt }),
-      onBytes: (bytes) => cb.onBytes?.(single.bytes + multi.bytes + bytes),
+      onBytes: (bytes) => cb.onBytes?.(payloadBytes(single) + payloadBytes(multi) + bytes),
     });
     const loadedUp = summarize(upload.rtts);
     if (loadedUp.count === 0) {
@@ -181,11 +157,16 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
 
     /* ---- 7. Derive ---- */
     const bufferbloat = computeBufferbloat(idleLatency, loadedDown, loadedUp);
+    const requestErrors = single.failedRequests + multi.failedRequests + upload.failedRequests;
+    const loadedFailed = single.failedProbes + multi.failedProbes + upload.failedProbes;
     const stability = computeStability(
       idleLatency.median,
       [...loadedDownRtts, ...upload.rtts],
       multi.cov,
       upload.cov,
+      loadedFailed,
+      requestErrors,
+      true,
     );
 
     const trace = await fetchTrace(serverId);
@@ -203,8 +184,7 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
       note: "Country code comes from Cloudflare's connection trace. Retail ISP, ASN, city, and region are not inferred from the edge code; an explicit opt-in lookup is available in Connection & Privacy.",
     };
 
-    const dataUsedMB = (single.bytes + multi.bytes + upload.bytes) / 1_000_000;
-    const requestErrors = single.failedRequests + multi.failedRequests + upload.failedRequests;
+    const dataUsedMB = (payloadBytes(single) + payloadBytes(multi) + payloadBytes(upload)) / 1_000_000;
 
     const confidence = computeConfidence({
       downloadSamples: multi.samples,
@@ -215,10 +195,14 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
       loadedUpProbeCount: upload.rtts.length,
       serverAvailable: server.chosen.available,
       serverJitterMs: server.chosen.latency.jitter,
+      downloadWarmupSucceeded: single.warmupSucceeded && multi.warmupSucceeded,
+      uploadWarmupSucceeded: upload.warmupSucceeded,
+      downloadMinimumDurationMet: multi.durationMs >= P.multi.minMs,
+      uploadMinimumDurationMet: upload.durationMs >= P.upload.minMs,
       tabForegroundThroughout,
       completed: true,
-      errors: requestErrors,
-      earlyStopped: single.earlyStopped || multi.earlyStopped || upload.earlyStopped,
+      errors: requestErrors + loadedFailed,
+      earlyStopped: single.earlyStopped || multi.earlyStopped,
     });
 
     const limitations = buildLimitations({
@@ -228,6 +212,13 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
       packetLossExperimental: true,
       earlyStopped: multi.earlyStopped,
       requestErrors,
+      loadedFailed,
+      warmupFailures: [single, multi, upload].filter((phase) => !phase.warmupSucceeded).length,
+      byteCappedPhases: [
+        single.stopReason === "data-cap" ? "single-download" : null,
+        multi.stopReason === "data-cap" ? "multi-download" : null,
+        upload.stopReason === "data-cap" ? "upload" : null,
+      ].filter((phase): phase is string => phase !== null),
     });
 
     cb.onPhase?.("done");
@@ -284,6 +275,9 @@ function buildLimitations(x: {
   packetLossExperimental: boolean;
   earlyStopped: boolean;
   requestErrors: number;
+  loadedFailed: number;
+  warmupFailures: number;
+  byteCappedPhases: string[];
 }): string[] {
   const out: string[] = [];
   if (x.packetLossExperimental)
@@ -293,7 +287,16 @@ function buildLimitations(x: {
   if (!x.tabForegroundThroughout) out.push("The tab was backgrounded during the test; browser timer throttling may have depressed throughput and latency.");
   if (x.idleFailed > 0) out.push(`${x.idleFailed} idle latency probe(s) failed.`);
   if (x.requestErrors > 0) out.push(`${x.requestErrors} throughput request(s) failed; confidence was reduced.`);
+  if (x.loadedFailed > 0) out.push(`${x.loadedFailed} loaded-latency probe(s) failed; stability and confidence were reduced.`);
+  if (x.warmupFailures > 0)
+    out.push(`${x.warmupFailures} transfer warm-up(s) failed; the affected phase used its configured request size and confidence was reduced.`);
+  if (x.byteCappedPhases.length > 0)
+    out.push(`Payload caps ended ${x.byteCappedPhases.join(", ")} before another request began; short phases receive lower confidence through duration and sample-count checks.`);
   if (x.earlyStopped)
     out.push("A phase stopped early once throughput samples were steady; the throughput estimate stabilized, but fewer loaded-latency probes can reduce confidence.");
   return out;
+}
+
+function payloadBytes(stats: { bytes: number; warmupBytes: number }): number {
+  return stats.bytes + stats.warmupBytes;
 }

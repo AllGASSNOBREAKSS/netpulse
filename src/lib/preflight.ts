@@ -7,6 +7,7 @@
  * "possible" — never asserted.
  */
 import { getServer } from "./servers";
+import { profileDataCeilingMB, PROFILES } from "./profiles";
 import type { Preflight, TestConfig, TriState } from "./types";
 
 function detectBrowser(ua: string): string {
@@ -85,26 +86,11 @@ function guessVpnProxy(trace: TraceInfo | null): { state: Preflight["vpnProxy"];
   if (!trace) return { state: "unknown", reason: "Connection metadata unavailable." };
   if (trace.warp === "on")
     return { state: "possible", reason: "Cloudflare WARP is active on this connection." };
-  try {
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
-    const tzRegion = tz.split("/")[0]; // e.g. "America", "Europe"
-    const country = trace.loc || "";
-    const tzToContinent: Record<string, string[]> = {
-      America: ["US", "CA", "MX", "BR", "AR", "CL", "CO"],
-      Europe: ["GB", "FR", "DE", "NL", "ES", "IT", "SE", "PL", "IE"],
-      Asia: ["JP", "SG", "IN", "HK", "KR", "CN"],
-      Australia: ["AU", "NZ"],
-    };
-    const expected = tzToContinent[tzRegion];
-    if (expected && country && !expected.includes(country))
-      return {
-        state: "possible",
-        reason: `Your timezone (${tz}) doesn't match the IP's country (${country}) — a VPN, proxy, or travel could explain it.`,
-      };
-    return { state: "unlikely", reason: "Timezone and IP location are broadly consistent (heuristic only)." };
-  } catch {
-    return { state: "unknown", reason: "Could not compare timezone to IP location." };
-  }
+  return {
+    state: "unknown",
+    reason:
+      "No reliable browser-only signal can distinguish a VPN or proxy from travel, provider routing, or normal address registration. Cloudflare WARP was not reported as active, but other VPNs remain unknown.",
+  };
 }
 
 export async function runPreflight(cfg: TestConfig): Promise<Preflight> {
@@ -139,10 +125,16 @@ export async function runPreflight(cfg: TestConfig): Promise<Preflight> {
     vpnProxyReason: vpn.reason,
     estimatedDurationSec: est.durationSec,
     estimatedDataMB: est.dataMB,
+    estimatedDataMaxMB: est.dataMaxMB,
   };
 }
 
 /** Rough estimates shown before the test so users can opt out on metered links. */
-export function estimate(lowData: boolean): { durationSec: number; dataMB: number } {
-  return lowData ? { durationSec: 20, dataMB: 40 } : { durationSec: 34, dataMB: 250 };
+export function estimate(lowData: boolean): { durationSec: number; dataMB: number; dataMaxMB: number } {
+  const profile = lowData ? PROFILES.lowData : PROFILES.full;
+  return {
+    durationSec: profile.estimatedDurationSec,
+    dataMB: profile.estimatedDataMB,
+    dataMaxMB: profileDataCeilingMB(lowData),
+  };
 }

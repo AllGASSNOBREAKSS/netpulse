@@ -8,6 +8,13 @@ export type HistoryEntry = {
   score: number;
   dataMB: number;
   confidence?: number;
+  loadedDownMs?: number;
+  loadedUpMs?: number;
+  jitterMs?: number;
+  stabilityScore?: number;
+  durationMs?: number;
+  connectionMedium?: "wifi" | "ethernet" | "mobile" | "other" | "unknown";
+  timezoneOffsetMinutes?: number;
 };
 
 const HISTORY_KEY = "netpulse_history";
@@ -43,6 +50,17 @@ function isHistoryEntry(value: unknown): value is HistoryEntry {
     typeof entry.grade === "string" &&
     typeof entry.score === "number" &&
     typeof entry.dataMB === "number" &&
-    (entry.confidence === undefined || typeof entry.confidence === "number")
+    optionalNumber(entry.confidence) &&
+    optionalNumber(entry.loadedDownMs) &&
+    optionalNumber(entry.loadedUpMs) &&
+    optionalNumber(entry.jitterMs) &&
+    optionalNumber(entry.stabilityScore) &&
+    optionalNumber(entry.durationMs) &&
+    optionalNumber(entry.timezoneOffsetMinutes) &&
+    (entry.connectionMedium === undefined || ["wifi", "ethernet", "mobile", "other", "unknown"].includes(String(entry.connectionMedium)))
   );
+}
+
+function optionalNumber(value: unknown): boolean {
+  return value === undefined || typeof value === "number" && Number.isFinite(value);
 }

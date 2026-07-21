@@ -1,232 +1,168 @@
-import { useEffect, useRef, useState } from "react";
-import { PROFILES, type Phase } from "../lib/engine";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useReducedMotion } from "../hooks/use-reduced-motion";
+import { SPEEDOMETER_BANDS, SPEEDOMETER_CEILING_MBPS, speedBand, speedToDialFraction } from "../lib/speedometer";
+import type { Phase } from "../lib/engine";
 
-/**
- * Automotive-cluster speedometer.
- *
- * A 270° dial (0 at lower-left, mid at top, max at lower-right) with a blue
- * progress sweep, a fixed redline zone, and a needle driven by spring physics
- * so live throughput samples feel like an engine revving — overshoot, settle,
- * surge. The center numeral is the live measured Mbps; nothing is synthetic.
- */
-
-const START_DEG = 135; // dial zero
-const SWEEP_DEG = 270; // total sweep
+const START_DEG = 135;
+const SWEEP_DEG = 270;
 const CX = 200;
 const CY = 200;
 const R_RING = 172;
-const R_ARC = 158;
+const R_ARC = 157;
 
-function polar(deg: number, r: number): [number, number] {
-  const rad = (deg * Math.PI) / 180;
-  return [CX + r * Math.cos(rad), CY + r * Math.sin(rad)];
+const BAND_COLORS = {
+  blue: "var(--speed-blue)",
+  yellow: "var(--speed-yellow)",
+  orange: "var(--speed-orange)",
+  red: "var(--speed-red)",
+} as const;
+
+const SCALE_LABELS = [
+  { fraction: 0, label: "0" },
+  { fraction: 0.25, label: "100" },
+  { fraction: 0.5, label: "200" },
+  { fraction: 0.75, label: "500" },
+  { fraction: 1, label: `${SPEEDOMETER_CEILING_MBPS}+` },
+] as const;
+
+function polar(deg: number, radius: number): [number, number] {
+  const radians = (deg * Math.PI) / 180;
+  return [CX + radius * Math.cos(radians), CY + radius * Math.sin(radians)];
 }
 
-function arcPath(fromDeg: number, toDeg: number, r: number): string {
-  const [x1, y1] = polar(fromDeg, r);
-  const [x2, y2] = polar(toDeg, r);
+function arcPath(fromDeg: number, toDeg: number, radius: number): string {
+  const [x1, y1] = polar(fromDeg, radius);
+  const [x2, y2] = polar(toDeg, radius);
   const large = toDeg - fromDeg > 180 ? 1 : 0;
-  return `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2}`;
-}
-
-/** Pick a dial max that keeps the needle in a useful range. */
-function dialMax(peak: number): number {
-  for (const m of [100, 240, 500, 1000, 2500, 10000]) {
-    if (peak <= m * 0.96) return m;
-  }
-  return 10000;
+  return `M ${x1} ${y1} A ${radius} ${radius} 0 ${large} 1 ${x2} ${y2}`;
 }
 
 export default function Speedometer({
   liveMbps,
-  peakMbps,
   phase,
-  idlePingMs,
   dataUsedMB,
   finalScore,
   lowData,
   onScoreClick,
 }: {
   liveMbps: number | null;
-  peakMbps: number;
   phase: Phase;
-  idlePingMs: number | undefined;
   dataUsedMB: number;
   finalScore: number | null;
   lowData: boolean;
   onScoreClick?: () => void;
 }) {
+  const reducedMotion = useReducedMotion();
   const [display, setDisplay] = useState(0);
-  const physics = useRef({ value: 0, velocity: 0, target: 0 });
-  const lastTickRef = useRef(0);
+  const valueRef = useRef(0);
+  const targetRef = useRef(0);
+  const renderedRef = useRef(0);
+  const isThroughput = phase === "download_single" || phase === "download_multi" || phase === "upload";
+  const targetValue = liveMbps !== null && (isThroughput || phase === "done") ? Math.max(0, liveMbps) : 0;
 
-  const isDownload = phase === "download_single" || phase === "download_multi";
-  const isLoading = isDownload || phase === "upload";
-
-  // Feed the spring's target from live samples.
   useEffect(() => {
-    const p = physics.current;
-    if (liveMbps !== null && isLoading) {
-      p.target = liveMbps;
-    } else if (phase === "done" || phase === "idle" || phase === "error") {
-      p.target = liveMbps ?? 0;
-    } else {
-      p.target = 0; // preflight/server/latency/packetloss: needle rests
+    targetRef.current = targetValue;
+    if (reducedMotion) {
+      valueRef.current = targetValue;
+      renderedRef.current = targetValue;
     }
-  }, [isLoading, liveMbps, phase]);
+  }, [reducedMotion, targetValue]);
 
-  // Watchdog: rAF is throttled or suspended in background tabs. Whenever the
-  // spring loop stops ticking, snap the dial straight to its target so it
-  // never shows a stale value.
   useEffect(() => {
-    const watchdog = setInterval(() => {
-      const p = physics.current;
-      if (performance.now() - lastTickRef.current > 400 && Math.abs(p.target - p.value) > 0.01) {
-        p.value = p.target;
-        p.velocity = 0;
-        setDisplay(p.target);
-      }
-    }, 300);
-    return () => clearInterval(watchdog);
-  }, []);
+    if (reducedMotion) return;
+    let animationFrame = 0;
+    let previousTime = performance.now();
 
-  // Spring loop — stiff enough to chase samples, soft enough to overshoot
-  // like a rev counter.
-  useEffect(() => {
-    let raf = 0;
-    let last = performance.now();
-    const tick = (now: number) => {
-      const dt = Math.min((now - last) / 1000, 0.05);
-      last = now;
-      const p = physics.current;
-      const stiffness = 42;
-      const damping = 9;
-      const accel = (p.target - p.value) * stiffness - p.velocity * damping;
-      p.velocity += accel * dt;
-      p.value = Math.max(0, p.value + p.velocity * dt);
-      lastTickRef.current = now;
-      // Only re-render while the needle is actually moving — at rest the
-      // loop idles without touching React state.
-      if (Math.abs(p.target - p.value) > 0.01 || Math.abs(p.velocity) > 0.01) {
-        setDisplay(p.value);
+    const tick = (time: number) => {
+      const elapsedSeconds = Math.min((time - previousTime) / 1000, 0.05);
+      previousTime = time;
+      const current = valueRef.current;
+      const target = targetRef.current;
+      const timeConstant = target >= current ? 0.34 : 0.58;
+      const blend = 1 - Math.exp(-elapsedSeconds / timeConstant);
+      const next = Math.abs(target - current) < 0.025 ? target : current + (target - current) * blend;
+      valueRef.current = next;
+      const reachedTarget = next === target && renderedRef.current !== target;
+      if (Math.abs(next - renderedRef.current) >= 0.02 || reachedTarget) {
+        renderedRef.current = next;
+        setDisplay(next);
       }
-      raf = requestAnimationFrame(tick);
+      animationFrame = requestAnimationFrame(tick);
     };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, []);
 
-  const max = dialMax(peakMbps);
-  const frac = Math.min(display / max, 1);
-  const needleDeg = START_DEG + frac * SWEEP_DEG;
-  const [nx1, ny1] = polar(needleDeg, R_ARC - 30);
-  const [nx2, ny2] = polar(needleDeg, R_RING - 4);
+    animationFrame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(animationFrame);
+  }, [reducedMotion]);
 
-  // Once the test is done the numeral is the measured result, straight from
-  // the engine — the spring only drives the needle's settle animation.
-  const shown = phase === "done" ? (liveMbps ?? display) : isLoading ? display : 0;
-  const waiting = phase === "preflight" || phase === "server" || phase === "latency" || phase === "packetloss";
-  const numeral = waiting ? "···" : shown >= 100 ? String(Math.round(shown)) : shown.toFixed(1);
-
-  // Gear = test phase, labeled with the stream count that actually runs.
-  const profile = lowData ? PROFILES.lowData : PROFILES.full;
-  const gear =
-    phase === "download_single"
-      ? "D1"
-      : phase === "download_multi"
-        ? `D${profile.dlStreams}`
-        : phase === "upload"
-          ? `U${profile.ulStreams}`
-          : phase === "latency"
-            ? "P"
-            : phase === "preflight" || phase === "server"
-              ? "•"
-              : phase === "packetloss"
-                ? "PL"
-                : phase === "done"
-                  ? "N"
-                  : "—";
-
-  // Redline: top 8% of the dial.
-  const redFrom = START_DEG + SWEEP_DEG * 0.92;
-
-  // Data bar: relative to the typical footprint of the current mode.
-  const dataFrac = Math.min(dataUsedMB / (lowData ? 40 : 400), 1);
+  const visualValue = reducedMotion ? targetValue : display;
+  const fraction = speedToDialFraction(visualValue);
+  const needleDegrees = START_DEG + fraction * SWEEP_DEG;
+  const currentBand = speedBand(visualValue);
+  const speedColor = BAND_COLORS[currentBand];
+  const shown = visualValue >= 100 ? String(Math.round(visualValue)) : visualValue.toFixed(1);
+  const dataFraction = Math.min(dataUsedMB / (lowData ? 40 : 400), 1);
 
   return (
-    <div className="speedo">
+    <div
+      className="speedo"
+      data-speed-band={currentBand}
+      style={{ "--speed-color": speedColor } as CSSProperties}
+      aria-label={`${shown} megabits per second`}
+    >
       <svg viewBox="0 0 400 400" className="speedo__dial" aria-hidden="true">
-        <defs>
-          <linearGradient id="sweep" x1="0%" y1="100%" x2="0%" y2="0%">
-            <stop offset="0%" stopColor="var(--blue-deep)" />
-            <stop offset="100%" stopColor="var(--blue)" />
-          </linearGradient>
-        </defs>
-
-        {/* outer thin ring */}
         <path d={arcPath(START_DEG, START_DEG + SWEEP_DEG, R_RING)} className="speedo__ring" />
 
-        {/* redline zone */}
-        <path d={arcPath(redFrom, START_DEG + SWEEP_DEG, R_RING)} className="speedo__redline" />
-
-        {/* live sweep */}
-        {frac > 0.005 && (
+        {SPEEDOMETER_BANDS.map((segment) => (
           <path
-            d={arcPath(START_DEG, START_DEG + frac * SWEEP_DEG, R_ARC)}
+            key={segment.band}
+            d={arcPath(START_DEG + segment.start * SWEEP_DEG, START_DEG + segment.end * SWEEP_DEG, R_RING)}
+            className={`speedo__band speedo__band--${segment.band}`}
+          />
+        ))}
+
+        {fraction > 0.001 && (
+          <path
+            d={arcPath(START_DEG, START_DEG + fraction * SWEEP_DEG, R_ARC)}
             className="speedo__sweep"
-            stroke="url(#sweep)"
           />
         )}
 
-        {/* needle */}
-        <line x1={nx1} y1={ny1} x2={nx2} y2={ny2} className="speedo__needle" />
+        <line
+          x1={CX + R_ARC - 32}
+          y1={CY}
+          x2={CX + R_RING - 5}
+          y2={CY}
+          transform={`rotate(${needleDegrees} ${CX} ${CY})`}
+          className="speedo__needle"
+        />
 
-        {/* major ticks */}
-        {[0, 0.5, 1].map((f) => {
-          const d = START_DEG + f * SWEEP_DEG;
-          const [tx1, ty1] = polar(d, R_RING - 8);
-          const [tx2, ty2] = polar(d, R_RING + 2);
-          return <line key={f} x1={tx1} y1={ty1} x2={tx2} y2={ty2} className="speedo__tick" />;
+        {SCALE_LABELS.map(({ fraction: labelFraction, label }) => {
+          const degrees = START_DEG + labelFraction * SWEEP_DEG;
+          const [tickInnerX, tickInnerY] = polar(degrees, R_RING - 10);
+          const [tickOuterX, tickOuterY] = polar(degrees, R_RING + 2);
+          const [labelX, labelY] = polar(degrees, R_RING - 30);
+          return (
+            <g key={label}>
+              <line x1={tickInnerX} y1={tickInnerY} x2={tickOuterX} y2={tickOuterY} className="speedo__tick" />
+              <text x={labelX} y={labelY} className="speedo__scale" textAnchor="middle" dominantBaseline="middle">{label}</text>
+            </g>
+          );
         })}
       </svg>
 
-      {/* dial labels */}
-      <span className="speedo__scale speedo__scale--zero">0</span>
-      <span className="speedo__scale speedo__scale--mid">{max / 2}</span>
-      <span className="speedo__scale speedo__scale--max">{max}</span>
-
-      {/* center cluster */}
       <div className="speedo__center">
-        <div className="speedo__row">
-          {idlePingMs !== undefined ? (
-            <span className="speedo__limit" title="Idle ping (ms)">
-              {Math.round(idlePingMs)}
-            </span>
-          ) : (
-            <span className="speedo__limit speedo__limit--empty" />
-          )}
-          <span className="speedo__value">{numeral}</span>
-          <span className="speedo__gear" title="Test phase">
-            {gear}
-          </span>
-        </div>
-        <div className="speedo__unit">MBPS</div>
+        <span className="speedo__value">{shown}</span>
+        <span className="speedo__unit">Mbps</span>
         {finalScore !== null && phase === "done" && (
-          <button
-            className="speedo__score"
-            onClick={onScoreClick}
-            title="See how this score is calculated"
-          >
+          <button className="speedo__score" onClick={onScoreClick} title="See how this score is calculated">
             health {finalScore}/100 ⓘ
           </button>
         )}
       </div>
 
-      {/* measured-payload fuel bar */}
       <div className="speedo__fuel" title="Application payload measured by this test">
-        <span className="speedo__fuel-icon">▮▯</span>
         <span className="speedo__fuel-track">
-          <span className="speedo__fuel-fill" style={{ width: `${Math.max(dataFrac * 100, 2)}%` }} />
+          <span className="speedo__fuel-fill" style={{ width: `${Math.max(dataFraction * 100, 2)}%` }} />
         </span>
         <span className="speedo__fuel-label">{dataUsedMB.toFixed(0)} MB</span>
       </div>

@@ -49,7 +49,10 @@ export type Preflight = {
   vpnProxy: "possible" | "unlikely" | "unknown";
   vpnProxyReason: string;
   estimatedDurationSec: number;
+  /** Typical application payload for the selected profile. */
   estimatedDataMB: number;
+  /** Configured application-payload ceiling before small in-flight overshoot. */
+  estimatedDataMaxMB: number;
 };
 
 /* ---- Server --------------------------------------------------------------- */
@@ -60,6 +63,10 @@ export type ServerProbe = {
   edgeCode: string | null;
   /** Country code reported for the client by the measurement provider. */
   clientCountryCode: string | null;
+  /** Unavailable unless supplied by a documented endpoint metadata source. */
+  city: string | null;
+  region: string | null;
+  approximateDistanceKm: number | null;
   protocol: string; // e.g. "HTTPS (fetch)"
   ipFamily: "IPv4" | "IPv6" | "unknown";
   latency: Summary;
@@ -84,13 +91,23 @@ export type ThroughputStats = {
   /** Application payload bits divided by the phase's actual elapsed time. */
   mbps: number;
   peakMbps: number;
-  samples: number[]; // raw per-window Mbps samples
+  medianMbps: number;
+  variationPct: number;
+  samples: number[]; // download windows or accepted-upload observations
   cov: number; // coefficient of variation of the stable window
   bytes: number;
+  /** Discarded connection warm-up payload, included in total data-use accounting. */
+  warmupBytes: number;
+  warmupSucceeded: boolean;
+  /** Adaptive request payload used for the measured phase. */
+  requestBytes: number;
   durationMs: number;
   earlyStopped: boolean;
+  stopReason: "stable" | "duration" | "data-cap" | "completed" | "error";
   /** Requests that failed before the phase completed. */
   failedRequests: number;
+  /** Loaded-latency probes that failed while traffic was active. */
+  failedProbes: number;
 };
 
 /* ---- Bufferbloat ---------------------------------------------------------- */
@@ -114,6 +131,10 @@ export type Stability = {
   spikes: number;
   longestSpikeMs: number;
   throughputCov: number; // worse of download/upload throughput variation
+  successfulProbes: number;
+  failedProbes: number;
+  completeness: number;
+  formula: string;
 };
 
 /* ---- Packet loss (experimental) ------------------------------------------- */

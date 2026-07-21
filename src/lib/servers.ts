@@ -103,6 +103,9 @@ async function probeCandidate(c: ServerCandidate, samples: number): Promise<Serv
     provider: c.provider,
     edgeCode: trace?.colo ?? null,
     clientCountryCode: trace?.loc ?? null,
+    city: null,
+    region: null,
+    approximateDistanceKm: null,
     protocol: c.protocol,
     ipFamily,
     latency,
@@ -153,7 +156,7 @@ export async function selectServer(
     chosen = available[0] ?? probes[0];
     reason =
       available.length <= 1
-        ? `${chosen.provider} (only reachable candidate). Anycast routed you to edge ${chosen.edgeCode ?? "unknown"} at ${Math.round(chosen.latency.median)} ms median HTTPS latency.`
+        ? `${chosen.provider} is the only configured reachable provider. Anycast routed this browser to edge ${chosen.edgeCode ?? "unknown"} at ${Math.round(chosen.latency.median)} ms median HTTPS latency; city, distance, and endpoint capacity are unavailable.`
         : `Lowest latency (${Math.round(chosen.latency.median)} ms median) and steadiest of ${available.length} reachable candidates.`;
   }
 

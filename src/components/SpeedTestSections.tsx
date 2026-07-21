@@ -1,9 +1,12 @@
 import { ArcAnimatedNumber, ArcFooter, ArcMeter, ArcSparkline } from "./ArcTelemetry";
-import { AlertTriangle, Check, FileJson, RotateCcw, Save, Share2, Zap } from "lucide-react";
+import { AlertTriangle, Check, FileJson, FileSpreadsheet, FileText, GitCompare, RotateCcw, Save, Share2, Zap } from "lucide-react";
+import { useState } from "react";
 import type { Phase, TestResult } from "../lib/engine";
 import type { HistoryEntry } from "../lib/history";
+import { downloadCsv, downloadDiagnosticReport } from "../lib/export";
 import type { MetricDef } from "../lib/metrics";
-import type { Preflight, ServerSelection } from "../lib/types";
+import { lookupNetworkIdentity, type NetworkIdentity } from "../lib/networkIdentity";
+import type { ServerSelection } from "../lib/types";
 import type { Verdict } from "../lib/verdict";
 import Speedometer from "./Speedometer";
 import { ConfidencePanel } from "./Report";
@@ -23,6 +26,7 @@ const MAIN_METRIC_IDS = new Set([
   "jitter",
   "packetLoss",
   "bufferbloat",
+  "stability",
 ]);
 
 export function HeroTestPanel({
@@ -30,8 +34,6 @@ export function HeroTestPanel({
   running,
   lowData,
   liveMbps,
-  peakMbps,
-  idlePingMs,
   dataUsedMB,
   result,
   verdict,
@@ -40,13 +42,13 @@ export function HeroTestPanel({
   onStart,
   onScore,
   onShare,
+  onCompare,
+  canCompare,
 }: {
   phase: Phase;
   running: boolean;
   lowData: boolean;
   liveMbps: number | null;
-  peakMbps: number;
-  idlePingMs?: number;
   dataUsedMB: number;
   result: TestResult | null;
   verdict: Verdict | null;
@@ -55,6 +57,8 @@ export function HeroTestPanel({
   onStart: () => void;
   onScore: () => void;
   onShare: () => void;
+  onCompare: () => void;
+  canCompare: boolean;
 }) {
   const score = verdict?.score ?? 0;
   return (
@@ -70,9 +74,7 @@ export function HeroTestPanel({
       <div className="hero-panel__gauge">
         <Speedometer
           liveMbps={liveMbps}
-          peakMbps={peakMbps}
           phase={phase}
-          idlePingMs={idlePingMs}
           dataUsedMB={dataUsedMB}
           finalScore={verdict?.score ?? null}
           lowData={lowData}
@@ -97,6 +99,10 @@ export function HeroTestPanel({
             <Share2 aria-hidden="true" />
             Share
           </Button>
+          <Button variant="outline" size="sm" disabled={!result || !canCompare} onClick={onCompare}>
+            <GitCompare aria-hidden="true" />
+            Compare
+          </Button>
         </div>
         {shareStatus && <p className="action-status" role="status">{shareStatus}</p>}
       </div>
@@ -105,34 +111,52 @@ export function HeroTestPanel({
 }
 
 export function ConnectionIdentity({
-  preflight,
   server,
   result,
 }: {
-  preflight: Preflight | null;
   server: ServerSelection | null;
   result: TestResult | null;
 }) {
   const identity = result?.ispLocation;
   const chosen = result?.server.chosen ?? server?.chosen;
-  const approximateArea = identity
-    ? [identity.city, identity.region, identity.country].filter(Boolean).join(", ") || null
-    : null;
+  const [lookup, setLookup] = useState<{
+    resultTimestamp: number;
+    state: "loading" | "ready" | "error";
+    identity: NetworkIdentity | null;
+  } | null>(null);
+  const activeLookup = lookup?.resultTimestamp === result?.timestamp ? lookup : null;
+  const enrichment = activeLookup?.identity ?? null;
+  const lookupState = activeLookup?.state ?? "idle";
+  const approximateArea = enrichment
+    ? [enrichment.city, enrichment.region, enrichment.country ?? enrichment.countryCode].filter(Boolean).join(", ") || null
+    : identity?.country ?? null;
+
+  const runLookup = async () => {
+    if (!result) return;
+    const resultTimestamp = result.timestamp;
+    setLookup({ resultTimestamp, state: "loading", identity: null });
+    try {
+      const next = await lookupNetworkIdentity();
+      setLookup({ resultTimestamp, state: "ready", identity: next });
+    } catch {
+      setLookup({ resultTimestamp, state: "error", identity: null });
+    }
+  };
 
   return (
     <Card className="result-section">
       <CardHeader>
         <CardTitle>Connection identity</CardTitle>
-        <CardDescription>Only facts returned by the active test are shown. IP-based locations are approximate.</CardDescription>
+        <CardDescription>Automatic fields come from the test provider. ISP and approximate area require a separate, explicit lookup.</CardDescription>
       </CardHeader>
       <CardContent className="identity-grid">
-        <IdentityItem label="ISP" value={identity?.ispHint} unavailable="Optional privacy lookup not run" />
-        <IdentityItem label="ASN" value={identity?.asn} unavailable="Optional privacy lookup not run" />
+        <IdentityItem label="ISP estimate" value={enrichment?.isp} unavailable="Optional privacy lookup not run" />
+        <IdentityItem label="ASN" value={enrichment?.asn} unavailable="Optional privacy lookup not run" />
         <IdentityItem label="Approximate region" value={approximateArea} unavailable="No location source available" />
         <IdentityItem label="Test-server edge" value={chosen?.edgeCode} unavailable="Edge code unavailable" />
         <IdentityItem label="Server provider" value={chosen?.provider} unavailable="Server not selected yet" />
+        <IdentityItem label="Masked public IP" value={identity?.ipMasked} unavailable="Available after the trace completes" />
         <IdentityItem label="IP version" value={identity?.ipFamily ?? chosen?.ipFamily} unavailable="Not detected" />
-        <IdentityItem label="Possible VPN" value={identity?.vpnProxy ?? preflight?.vpnProxy} unavailable="Not assessed" />
         <IdentityItem
           label="Result confidence"
           value={result ? `${result.confidence.score}%` : null}
@@ -140,7 +164,15 @@ export function ConnectionIdentity({
         />
       </CardContent>
       <CardFooter className="identity-note">
-        Server edge codes identify the provider edge that answered; they are not claimed as a physical server location.
+        <div>
+          <p>Server edge codes are routing metadata, not a claimed physical server location. The provider does not publish a reliable server address or distance for this endpoint, so NetPulse does not show empty location cards. IP geolocation is approximate.</p>
+          <p>The optional lookup contacts ipwho.is, which sees your public IP. NetPulse keeps only the masked value in memory and does not add it to history or exports.</p>
+          {enrichment && <p>Lookup source: {enrichment.source}. Full IP retained: no.</p>}
+          {lookupState === "error" && <p role="status">Lookup unavailable. No ISP, ASN, or city is being claimed.</p>}
+        </div>
+        <Button variant="outline" size="sm" disabled={!result || lookupState === "loading"} onClick={() => void runLookup()}>
+          {lookupState === "loading" ? "Looking up…" : enrichment ? "Refresh identity" : "Look up ISP & area"}
+        </Button>
       </CardFooter>
     </Card>
   );
@@ -251,11 +283,12 @@ export function DiagnosisPanel({ verdict }: { verdict: Verdict | null }) {
 export function ImpactPanel({ verdict, result }: { verdict: Verdict | null; result: TestResult | null }) {
   const find = (name: string) => verdict?.activities.find((activity) => activity.name === name);
   const categories = [
-    { key: "gaming", title: "Gaming", entries: [find("Competitive gaming"), find("Gaming while others download")] },
-    { key: "streaming", title: "Streaming", entries: [find("4K streaming"), find("Cloud gaming")] },
+    { key: "gaming", title: "Gaming", entries: [find("Competitive gaming"), find("Casual gaming"), find("Gaming while others download")] },
+    { key: "streaming", title: "Streaming and downloads", entries: [find("4K streaming"), find("Cloud gaming"), find("Large downloads")] },
     { key: "work", title: "Work and video calls", entries: [find("Video calls")] },
-    { key: "uploading", title: "Uploading", entries: [find("Livestreaming"), find("Large uploads / backups")] },
-    { key: "browsing", title: "Browsing", entries: [find("Everyday browsing")] },
+    { key: "uploading", title: "Uploading", entries: [find("Livestreaming"), find("Cloud backups")] },
+    { key: "browsing", title: "Browsing", entries: [find("General browsing")] },
+    { key: "smart-home", title: "Smart-home usage", entries: [find("Smart-home usage")] },
   ];
 
   return (
@@ -282,8 +315,8 @@ export function ImpactPanel({ verdict, result }: { verdict: Verdict | null; resu
                 </AccordionContent>
               </AccordionItem>
             ))}
-            <AccordionItem value="smart-home">
-              <AccordionTrigger>Smart-home devices</AccordionTrigger>
+            <AccordionItem value="smart-home-limit">
+              <AccordionTrigger>Smart-home measurement limitation</AccordionTrigger>
               <AccordionContent>
                 <p className="impact-limitation">
                   NetPulse cannot see, count, or identify devices on your local network. {result
@@ -301,10 +334,12 @@ export function ImpactPanel({ verdict, result }: { verdict: Verdict | null; resu
 
 export function RawDataPanel({
   result,
+  verdict,
   onScore,
   onMethod,
 }: {
   result: TestResult | null;
+  verdict: Verdict | null;
   onScore: () => void;
   onMethod: () => void;
 }) {
@@ -313,11 +348,13 @@ export function RawDataPanel({
     <Card className="result-section raw-panel">
       <CardHeader>
         <CardTitle>Raw technical data</CardTitle>
-        <CardDescription>{result.samples.length} stored events · {(result.durationMs / 1000).toFixed(1)} s · {result.dataUsedMB.toFixed(0)} MB measured payload</CardDescription>
+        <CardDescription>{result.samples.length} stored events · {(result.durationMs / 1000).toFixed(1)} s · {result.dataUsedMB.toFixed(1)} MB application payload including warm-ups</CardDescription>
       </CardHeader>
       <CardContent><ConfidencePanel confidence={result.confidence} /></CardContent>
       <CardFooter className="raw-panel__actions">
         <Button variant="outline" onClick={onScore}>Scoring breakdown</Button>
+        <Button variant="outline" onClick={() => downloadCsv(result, verdict)}><FileSpreadsheet aria-hidden="true" /> Export CSV</Button>
+        <Button variant="outline" onClick={() => downloadDiagnosticReport(result, verdict)}><FileText aria-hidden="true" /> Diagnostic report</Button>
         <Button variant="outline" onClick={onMethod}><FileJson aria-hidden="true" /> Methodology and JSON</Button>
       </CardFooter>
     </Card>
@@ -358,13 +395,63 @@ function formatSpeed(value: number): string {
 }
 
 export function NetPulseFooter() {
+  const linkGroups = [
+    {
+      label: "Project",
+      links: [
+        ["About", "https://github.com/bbarc0de/netpulse#readme"],
+        ["GitHub", "https://github.com/bbarc0de/netpulse"],
+        ["Documentation", "https://github.com/bbarc0de/netpulse/blob/main/README.md"],
+        ["Methodology", "https://github.com/bbarc0de/netpulse/blob/main/ENGINE.md"],
+      ],
+    },
+    {
+      label: "Trust",
+      links: [
+        ["Network Status", "https://www.cloudflarestatus.com/"],
+        ["Accessibility", "https://github.com/bbarc0de/netpulse/blob/main/ACCESSIBILITY.md"],
+        ["Privacy", "https://github.com/bbarc0de/netpulse/blob/main/PRIVACY.md"],
+        ["Security", "https://github.com/bbarc0de/netpulse/blob/main/SECURITY.md"],
+      ],
+    },
+    {
+      label: "Legal & contact",
+      links: [
+        ["Terms", "https://github.com/bbarc0de/netpulse/blob/main/TERMS.md"],
+        ["License", "https://github.com/bbarc0de/netpulse/blob/main/LICENSE"],
+        ["Contact", "https://github.com/bbarc0de/netpulse/issues/new/choose"],
+      ],
+    },
+  ] as const;
+
   return (
     <ArcFooter className="netpulse-footer">
       <div slot="logo" className="footer-brand">net<span>pulse</span></div>
-      <div>
+      <p className="footer-method-note">
         Browser measurements use live HTTPS requests to the selected provider edge. Different test endpoints and methods can produce different results.
-      </div>
-      <div slot="social"><a href="https://github.com/bbarc0de/netpulse" target="_blank" rel="noreferrer">GitHub</a></div>
+      </p>
+      <nav className="footer-nav" aria-label="NetPulse footer">
+        {linkGroups.map((group) => (
+          <section key={group.label} aria-labelledby={`footer-${group.label.toLowerCase().replaceAll(" ", "-").replace("&", "and")}`}>
+            <h2 id={`footer-${group.label.toLowerCase().replaceAll(" ", "-").replace("&", "and")}`}>{group.label}</h2>
+            <ul>
+              {group.links.map(([label, href]) => (
+                <li key={label}>
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={label === "Network Status" ? "Cloudflare test-provider status (external)" : undefined}
+                  >
+                    {label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
+      </nav>
+      <div slot="social"><a href="https://github.com/bbarc0de/netpulse" target="_blank" rel="noopener noreferrer">GitHub</a></div>
       <div slot="legal" className="footer-legal">
         <Separator />
         <p>© 2026 NetPulse and contributors.</p>

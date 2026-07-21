@@ -15,6 +15,10 @@ export type ConfidenceInputs = {
   loadedUpProbeCount: number;
   serverAvailable: boolean;
   serverJitterMs: number;
+  downloadWarmupSucceeded: boolean;
+  uploadWarmupSucceeded: boolean;
+  downloadMinimumDurationMet: boolean;
+  uploadMinimumDurationMet: boolean;
   tabForegroundThroughout: boolean;
   completed: boolean;
   errors: number;
@@ -36,6 +40,20 @@ export function computeConfidence(i: ConfidenceInputs): Confidence {
 
   const ulCount = i.uploadSamples.length;
   add("Upload sampling", ulCount >= 3, `${ulCount} accepted-payload observations`, ulCount > 0 ? 6 : 18);
+
+  const uploadCov = coefficientOfVariation(i.uploadSamples.slice(Math.floor(ulCount / 2)));
+  if (ulCount < 2) {
+    add("Upload consistency", false, "Too few accepted-payload observations to assess variation", 8);
+  } else if (uploadCov < 0.15) {
+    add("Upload consistency", true, `Accepted-payload observations were steady (CoV ${uploadCov.toFixed(2)})`);
+  } else {
+    add(
+      "Upload consistency",
+      false,
+      `Accepted-payload observations varied (CoV ${uploadCov.toFixed(2)})`,
+      uploadCov < 0.3 ? 5 : 10,
+    );
+  }
 
   add(
     "Idle latency sampling",
@@ -76,6 +94,31 @@ export function computeConfidence(i: ConfidenceInputs): Confidence {
       10,
     );
   }
+
+  add(
+    "Download warm-up",
+    i.downloadWarmupSucceeded,
+    i.downloadWarmupSucceeded ? "Connection warmed before timed download" : "Download warm-up failed; fixed request sizing was used",
+    4,
+  );
+  add(
+    "Upload warm-up",
+    i.uploadWarmupSucceeded,
+    i.uploadWarmupSucceeded ? "Connection warmed before timed upload" : "Upload warm-up failed; fixed request sizing was used",
+    4,
+  );
+  add(
+    "Download duration",
+    i.downloadMinimumDurationMet,
+    i.downloadMinimumDurationMet ? "Minimum timed download duration completed" : "Payload cap ended download before its minimum duration",
+    6,
+  );
+  add(
+    "Upload duration",
+    i.uploadMinimumDurationMet,
+    i.uploadMinimumDurationMet ? "Minimum timed upload duration completed" : "Payload cap ended upload before its minimum duration",
+    6,
+  );
 
   if (i.tabForegroundThroughout) add("Tab visibility", true, "Foreground for the whole test");
   else {

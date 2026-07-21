@@ -39,7 +39,7 @@ export function PreflightServer({
         </div>
         {preOnly && (
           <div className="pf__est">
-            Estimated: ~{preflight.estimatedDurationSec}s · ~{preflight.estimatedDataMB} MB
+            Estimated: ~{preflight.estimatedDurationSec}s · typically ~{preflight.estimatedDataMB} MB · configured cap {preflight.estimatedDataMaxMB} MB before in-flight overshoot
           </div>
         )}
       </div>
@@ -54,6 +54,8 @@ export function PreflightServer({
             <Chip k="Protocol" v={server.chosen.protocol} />
             <Chip k="IP" v={server.chosen.ipFamily} />
             <Chip k="Latency" v={`${Math.round(server.chosen.latency.median)} ms`} />
+            <Chip k="Server city" v={server.chosen.city ?? "unavailable"} />
+            <Chip k="Distance" v={server.chosen.approximateDistanceKm === null ? "unavailable" : `${server.chosen.approximateDistanceKm} km`} />
           </div>
           <div className="pf__reason">{server.reason}</div>
         </div>
@@ -134,7 +136,11 @@ export function MethodologyModal({
             <tr><td className="mi__range">Server</td><td>{result.server.chosen.provider} · edge {result.server.chosen.edgeCode ?? "unknown"} · {result.server.chosen.protocol}</td></tr>
             <tr><td className="mi__range">Mode</td><td>{result.lowData ? "Low-data" : "Full"}</td></tr>
             <tr><td className="mi__range">IP family</td><td>{result.ispLocation.ipFamily} · {result.ispLocation.ipMasked}</td></tr>
-            <tr><td className="mi__range">Payload measured</td><td>{result.dataUsedMB.toFixed(0)} MB in {(result.durationMs / 1000).toFixed(1)} s</td></tr>
+            <tr><td className="mi__range">Payload transferred</td><td>{result.dataUsedMB.toFixed(1)} MB including discarded warm-ups, in {(result.durationMs / 1000).toFixed(1)} s</td></tr>
+            <tr><td className="mi__range">Download phase</td><td>{(result.download.multi.durationMs / 1000).toFixed(2)} s · {formatBytes(result.download.multi.bytes + result.download.multi.warmupBytes)} payload · {result.download.multi.samples.length} timed windows · {result.download.multi.variationPct.toFixed(1)}% variation · stop: {result.download.multi.stopReason}</td></tr>
+            <tr><td className="mi__range">Download requests</td><td>{formatBytes(result.download.multi.requestBytes)} adaptive payload · warm-up {result.download.multi.warmupSucceeded ? "completed" : "failed"}</td></tr>
+            <tr><td className="mi__range">Upload phase</td><td>{(result.upload.durationMs / 1000).toFixed(2)} s · {formatBytes(result.upload.bytes + result.upload.warmupBytes)} payload · {result.upload.samples.length} accepted observations · {result.upload.variationPct.toFixed(1)}% observed variation · stop: {result.upload.stopReason}</td></tr>
+            <tr><td className="mi__range">Upload requests</td><td>{formatBytes(result.upload.requestBytes)} adaptive payload · warm-up {result.upload.warmupSucceeded ? "completed" : "failed"}</td></tr>
             <tr><td className="mi__range">Raw samples</td><td>{result.samples.length} events stored</td></tr>
           </tbody>
         </table>
@@ -194,4 +200,8 @@ export function MethodologyModal({
       </section>
     </Modal>
   );
+}
+
+function formatBytes(bytes: number): string {
+  return bytes >= 1_000_000 ? `${(bytes / 1_000_000).toFixed(2)} MB` : `${Math.round(bytes / 1000)} kB`;
 }
