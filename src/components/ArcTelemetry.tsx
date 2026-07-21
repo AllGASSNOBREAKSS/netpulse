@@ -10,15 +10,7 @@ import { createElement, type HTMLAttributes, type ReactNode } from "react";
 
 type ArcBaseProps = HTMLAttributes<HTMLElement> & { children?: ReactNode };
 
-export function ArcAnimatedNumber({
-  value,
-  duration = 500,
-  decimals,
-  prefix,
-  suffix,
-  className,
-  ...props
-}: ArcBaseProps & {
+export function ArcAnimatedNumber({ value, duration = 500, decimals, prefix, suffix, className, ...props }: ArcBaseProps & {
   value: number;
   duration?: number;
   decimals?: number;
@@ -28,17 +20,7 @@ export function ArcAnimatedNumber({
   return createElement("arc-animated-number", { value, duration, decimals, prefix, suffix, class: className, ...props });
 }
 
-export function ArcMeter({
-  value,
-  min = 0,
-  max = 100,
-  low,
-  high,
-  optimum,
-  label,
-  className,
-  ...props
-}: ArcBaseProps & {
+export function ArcMeter({ value, min = 0, max = 100, low, high, optimum, label, className, ...props }: ArcBaseProps & {
   value: number;
   min?: number;
   max?: number;
@@ -50,16 +32,7 @@ export function ArcMeter({
   return createElement("arc-meter", { value, min, max, low, high, optimum, label, class: className, ...props });
 }
 
-export function ArcSparkline({
-  data,
-  type = "line",
-  color = "var(--accent-primary)",
-  width = 180,
-  height = 42,
-  fill,
-  className,
-  ...props
-}: ArcBaseProps & {
+export function ArcSparkline({ data, type = "line", color = "var(--accent-primary)", width = 180, height = 42, fill, className, ...props }: ArcBaseProps & {
   data: number[];
   type?: "line" | "bar" | "area";
   color?: string;
@@ -67,28 +40,14 @@ export function ArcSparkline({
   height?: number;
   fill?: boolean;
 }) {
-  return createElement("arc-sparkline", {
-    data: data.join(","),
-    type,
-    color,
-    width,
-    height,
-    fill: fill ? "" : undefined,
-    class: className,
-    ...props,
-  });
+  return createElement("arc-sparkline", { data: data.join(","), type, color, width, height, fill: fill ? "" : undefined, class: className, ...props });
 }
 
 export function ArcConnectionStatus({ className, ...props }: ArcBaseProps) {
   return createElement("arc-connection-status", { class: className, ...props });
 }
 
-export function ArcProgress({
-  value,
-  label,
-  className,
-  ...props
-}: ArcBaseProps & { value: number; label: string }) {
+export function ArcProgress({ value, label, className, ...props }: ArcBaseProps & { value: number; label: string }) {
   return createElement("arc-progress", { value, label, class: className, ...props });
 }
 
@@ -96,20 +55,10 @@ export function ArcTimeline({ className, ...props }: ArcBaseProps) {
   return createElement("arc-timeline", { class: className, ...props });
 }
 
-export function ArcTimelineItem({
-  heading,
-  date,
-  className,
-  ...props
-}: ArcBaseProps & { heading: string; date?: string }) {
+export function ArcTimelineItem({ heading, date, className, ...props }: ArcBaseProps & { heading: string; date?: string }) {
   return createElement("arc-timeline-item", { heading, date, class: className, ...props });
 }
 
 export function ArcFooter({ compact = true, border = true, className, ...props }: ArcBaseProps & { compact?: boolean; border?: boolean }) {
-  return createElement("arc-footer", {
-    compact: compact ? "" : undefined,
-    border: border ? "" : undefined,
-    class: className,
-    ...props,
-  });
+  return createElement("arc-footer", { compact: compact ? "" : undefined, border: border ? "" : undefined, class: className, ...props });
 }

@@ -1,0 +1,281 @@
+/**
+ * NetPulse design tokens + Tailwind v4 + shadcn/ui theme layer.
+ *
+ * Semantic tokens only — components never hard-code colors. Two themes:
+ * :root = light, .dark = dark (dark is the product default; an inline script
+ * in index.html applies the class before first paint to avoid flashing).
+ *
+ * The legacy custom-CSS surfaces in styles.css consume the --np-* aliases at
+ * the bottom, so the whole app (gauges, modals, panels) themes together.
+ */
+/* ---- Cascade layer order (declare ONCE, before any @import) ----
+   Later layers beat earlier ones regardless of specificity, and unlayered CSS
+   beats every layer. So every stylesheet below is assigned a layer on purpose:
+
+     reset        Astryx's :where() reset — lowest, overrides nothing
+     theme/base   Tailwind v4 @theme vars + Preflight
+     astryx-*     Astryx component base + theme tokens (must beat Preflight)
+     np-legacy    styles.css — NetPulse gauges/modals/panels (beats Astryx
+                  defaults so the custom speedometers keep their own look)
+     components   shadcn/ui primitives still in use
+     utilities    Tailwind utilities — must stay last so app classes win
+
+   Tailwind is imported as its three parts instead of `@import "tailwindcss"`
+   so Preflight can be layered; unlayered Preflight silently overrides Astryx
+   theme CSS. See `npx astryx docs migration` → Cascade Layer Safety. */
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/space-grotesk";
+
+@layer reset, theme, base, astryx-base, astryx-theme, np-legacy, components, utilities;
+
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/preflight.css" layer(base);
+
+@import "@astryxdesign/core/reset.css";
+@import "@astryxdesign/core/astryx.css";
+@import "@astryxdesign/theme-neutral/theme.css";
+@import "@astryxdesign/core/tailwind-theme.css";
+
+@import "./styles.css" layer(np-legacy);
+
+@import "tailwindcss/utilities.css" layer(utilities);
+
+@custom-variant dark (&:is(.dark *));
+
+/* ---- Light theme ----
+   Values are kept in lockstep with src/theme/netpulse.ts so Astryx components
+   and the shadcn/legacy surfaces resolve to the SAME colors. If you change one,
+   change the other. */
+:root {
+  --radius: 0.5rem;
+
+  --background: #fafafb;
+  --foreground: #101114;
+  --card: #ffffff;
+  --card-foreground: #101114;
+  --popover: #ffffff;
+  --popover-foreground: #101114;
+  --primary: #0b5fd9;
+  --primary-foreground: #ffffff;
+  --secondary: #f2f3f5;
+  --secondary-foreground: #101114;
+  --muted: #f2f3f5;
+  --muted-foreground: #5c626d;
+  --accent: #eef0f3;
+  --accent-foreground: #101114;
+  --destructive: #c4342b;
+  --destructive-foreground: #ffffff;
+  --border: #e6e7ea;
+  --input: #d9dbe0;
+  --ring: #0b5fd9;
+
+  --chart-1: #0b5fd9;
+  --chart-2: #1a8a4f;
+  --chart-3: #b26a00;
+  --chart-4: #7048c9;
+  --chart-5: #c4342b;
+
+  --speed-blue: #0b5fd9;
+  --speed-yellow: #d6a900;
+  --speed-orange: #d76500;
+  --speed-red: #c4342b;
+
+  --sidebar: #f4f5f7;
+  --sidebar-foreground: #101114;
+  --sidebar-primary: #0b5fd9;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e8eaee;
+  --sidebar-accent-foreground: #101114;
+  --sidebar-border: #e0e2e6;
+  --sidebar-ring: #0b5fd9;
+
+  /* Status: green healthy, orange warning, red failure only. */
+  --status-good: #1a8a4f;
+  --status-warn: #b26a00;
+  --status-bad: #c4342b;
+}
+
+/* ---- Dark theme (product default) ----
+   Deep-black workspace, charcoal sidebar and elevated surfaces. */
+.dark {
+  --background: #08090b;
+  --foreground: #f4f5f7;
+  --card: #141519;
+  --card-foreground: #f4f5f7;
+  --popover: #17181d;
+  --popover-foreground: #f4f5f7;
+  --primary: #1d6bf0;
+  --primary-foreground: #ffffff;
+  --secondary: #1a1b20;
+  --secondary-foreground: #f4f5f7;
+  --muted: #1a1b20;
+  --muted-foreground: #9ba1ac;
+  --accent: #1c1e24;
+  --accent-foreground: #f4f5f7;
+  --destructive: #f2635a;
+  --destructive-foreground: #14090a;
+  --border: #23252b;
+  --input: #2b2e35;
+  --ring: #3a7dff;
+
+  --chart-1: #4b8dff;
+  --chart-2: #3dd68c;
+  --chart-3: #f0a93b;
+  --chart-4: #a98bff;
+  --chart-5: #f2635a;
+
+  --speed-blue: #4b8dff;
+  --speed-yellow: #f2d34f;
+  --speed-orange: #f59e0b;
+  --speed-red: #f2635a;
+
+  --sidebar: #0e0f12;
+  --sidebar-foreground: #f4f5f7;
+  --sidebar-primary: #1d6bf0;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #1a1b20;
+  --sidebar-accent-foreground: #f4f5f7;
+  --sidebar-border: #1c1e24;
+  --sidebar-ring: #3a7dff;
+
+  --status-good: #3dd68c;
+  --status-warn: #f0a93b;
+  --status-bad: #f2635a;
+}
+
+/* ---- Tailwind theme bridge ---- */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-status-good: var(--status-good);
+  --color-status-warn: var(--status-warn);
+  --color-status-bad: var(--status-bad);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --font-sans: "Geist Variable", system-ui, sans-serif;
+  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --font-display: "Space Grotesk Variable", "Geist Variable", system-ui, sans-serif;
+  --font-wordmark: "Space Grotesk Variable", "Geist Variable", system-ui, sans-serif;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    @apply bg-background;
+    /* One content width for header, main and footer, so the three can never
+       drift out of alignment. */
+    --np-content: 68rem;
+    --np-gutter: 1.25rem;
+  }
+  @media (min-width: 640px) {
+    html {
+      --np-gutter: 1.75rem;
+    }
+  }
+  @media (min-width: 1280px) {
+    html {
+      --np-gutter: 2.5rem;
+    }
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-size: 15px;
+    line-height: 1.6;
+  }
+
+  /* One visible focus indicator for the whole product (WCAG 2.4.7). */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+}
+
+@layer components {
+  /* The shared content container. Header, main and footer all use it, which is
+     what keeps them aligned at every width. */
+  .np-container {
+    margin-inline: auto;
+    width: 100%;
+    max-width: var(--np-content);
+    padding-inline: var(--np-gutter);
+  }
+}
+
+/* Motion is opt-out at the source, not per component. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---- Legacy variable bridge (styles.css surfaces) ----
+   Note: legacy text-gray was `--muted`, which collides with shadcn's muted
+   SURFACE token — legacy usages are renamed to --np-muted in styles.css. */
+:root {
+  --console: var(--background);
+  --rail: var(--sidebar);
+  --panel: var(--card);
+  --line: var(--border);
+  --blue: var(--primary);
+  --blue-deep: var(--primary);
+  --red: var(--status-bad);
+  --green: var(--status-good);
+  --amber: var(--status-warn);
+  --text: var(--foreground);
+  --np-muted: var(--muted-foreground);
+  --display: var(--font-sans);
+  --mono: var(--font-mono);
+  --cluster: var(--font-display);
+}

@@ -172,6 +172,9 @@ export type Confidence = {
 /* ---- Config --------------------------------------------------------------- */
 export type TestConfig = {
   lowData: boolean;
+  /** Measurement profile. Defaults to lowData?"lowData":"full". "quick" is the
+   *  light profile used by guided A/B diagnostics (Fix My Internet). */
+  profile?: "full" | "lowData" | "quick";
   serverId?: string; // manual server pick
 };
 

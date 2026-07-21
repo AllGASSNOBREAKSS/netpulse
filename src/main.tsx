@@ -1,16 +1,13 @@
 import { createRoot } from "react-dom/client";
-import App from "./App";
-import { ThemeProvider } from "./components/ThemeProvider";
-import { TooltipProvider } from "./components/ui/tooltip";
-import { applyStoredTheme } from "./lib/theme";
-import "./styles.css";
-
-applyStoredTheme();
+import { Root } from "./Root";
+import { AstryxProvider } from "./theme/AstryxProvider";
+// index.css owns the cascade layer order and imports styles.css into the
+// np-legacy layer. Importing styles.css here too would re-add it UNLAYERED,
+// where it would beat every Astryx layer.
+import "./index.css";
 
 createRoot(document.getElementById("root")!).render(
-  <ThemeProvider>
-    <TooltipProvider>
-      <App />
-    </TooltipProvider>
-  </ThemeProvider>,
+  <AstryxProvider>
+    <Root />
+  </AstryxProvider>,
 );

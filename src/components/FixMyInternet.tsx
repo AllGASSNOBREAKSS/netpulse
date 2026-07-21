@@ -1,683 +1,525 @@
+import { useCallback, useRef, useState } from "react";
 import {
-  Activity,
   ArrowRight,
   CheckCircle2,
-  CircleAlert,
-  Clock3,
-  Download,
-  EthernetPort,
-  FileDown,
-  FlaskConical,
-  Gauge,
-  Info,
-  Laptop,
-  ListChecks,
-  Play,
-  RefreshCcw,
-  Router,
-  ShieldAlert,
-  Signal,
-  Sparkles,
-  Trash2,
-  TriangleAlert,
-  Wifi,
-  XCircle,
-  type LucideIcon,
+  FileJson,
+  FileSpreadsheet,
+  MinusCircle,
+  RotateCcw,
+  Share2,
+  Wrench,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { EmptyState, KeyValueList, PageHeader, Panel, Section, StatGrid, StatusPill } from "@/components/np/Layout";
+import { cn } from "@/lib/utils";
 import { runTest, type Phase, type TestResult } from "../lib/engine";
+import { downloadCsv, downloadText } from "../lib/export";
 import {
-  DEFAULT_CONDITIONS,
-  SYMPTOMS,
-  createDiagnosticSession,
-  evaluateDiagnostic,
-  snapshotDiagnosticRun,
-  type AssessmentState,
-  type CauseAssessment,
-  type DiagnosticConditions,
-  type DiagnosticRunKind,
-  type DiagnosticSession,
-  type DiagnosticSymptom,
-} from "../lib/diagnostics";
-import { COMPARISONS, GUIDES, recommendedComparisons, type DiagnosticComparison } from "../lib/diagnosticKnowledge";
-import { downloadPrivacySafeDiagnosticReport } from "../lib/diagnosticReport";
-import { deleteDiagnosticSession, loadDiagnosticSessions, saveDiagnosticSession } from "../lib/diagnosticSessions";
-import { ArcProgress, ArcTimeline, ArcTimelineItem } from "./ArcTelemetry";
-import { NetPulseFooter } from "./SpeedTestSections";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "./ui/accordion";
-import { Badge } from "./ui/badge";
-import { Button } from "./ui/button";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "./ui/card";
-import { Input } from "./ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { Separator } from "./ui/separator";
-import { Switch } from "./ui/switch";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
+  buildFixReport,
+  compare,
+  conclude,
+  evaluateStep,
+  fixCsvRows,
+  fixSessionExport,
+  recommendStep,
+  remainingSteps,
+  snapshot,
+  type FixSession,
+  type FixStep,
+  type Snapshot,
+  type StepId,
+  type StepOutcome,
+} from "../lib/fixit";
 
-const PHASE_DETAILS: Record<Phase, { label: string; progress: number }> = {
-  idle: { label: "Ready to measure", progress: 0 },
-  preflight: { label: "Checking browser and connection", progress: 8 },
-  server: { label: "Selecting the measurement endpoint", progress: 18 },
-  latency: { label: "Measuring idle latency", progress: 30 },
-  download_single: { label: "Measuring single-stream download", progress: 44 },
-  download_multi: { label: "Measuring multi-stream download and loaded latency", progress: 60 },
-  upload: { label: "Measuring upload and loaded latency", progress: 78 },
-  packetloss: { label: "Checking experimental UDP reachability", progress: 92 },
-  done: { label: "Measurement complete", progress: 100 },
-  error: { label: "Measurement stopped", progress: 0 },
+const KEY = "netpulse_fixit";
+
+function loadSessions(): FixSession[] {
+  try {
+    return JSON.parse(localStorage.getItem(KEY) ?? "[]");
+  } catch {
+    return [];
+  }
+}
+function saveSession(s: FixSession) {
+  try {
+    const all = loadSessions().filter((x) => x.id !== s.id);
+    localStorage.setItem(KEY, JSON.stringify([s, ...all].slice(0, 20)));
+  } catch {
+    /* localStorage unavailable */
+  }
+}
+
+const PHASE_SHORT: Partial<Record<Phase, string>> = {
+  preflight: "inspecting",
+  server: "selecting server",
+  latency: "latency",
+  download_single: "download (1)",
+  download_multi: "download (multi)",
+  upload: "upload",
+  packetloss: "UDP check",
 };
 
-const SYMPTOM_ICONS: Record<DiagnosticSymptom, LucideIcon> = {
-  "buffering-video": Play,
-  "video-calls": Signal,
-  gaming: Activity,
-  "slow-downloads": Download,
-  "slow-uploads": Gauge,
-  "slow-websites": Clock3,
-  intermittent: RefreshCcw,
-  offline: XCircle,
-  other: CircleAlert,
-};
+/**
+ * Symptom selection is CONTEXT, not diagnosis. It frames the session and is
+ * carried into the exported report, but the recommended next test still comes
+ * from `recommendStep` — i.e. from measurements, never from what you clicked.
+ */
+const SYMPTOMS = [
+  { id: "slow", label: "Everything feels slow", note: "Pages, downloads and streams all crawl." },
+  { id: "calls", label: "Video calls break up", note: "Audio robotic, video freezing, others cut out." },
+  { id: "gaming", label: "Games lag or rubber-band", note: "Fine most of the time, terrible in moments." },
+  { id: "shared", label: "Bad when others are online", note: "One person streaming ruins it for everyone." },
+  { id: "rooms", label: "Only in some rooms", note: "Great near the router, poor further away." },
+  { id: "evening", label: "Only at certain times", note: "Fine by day, unusable in the evening." },
+] as const;
 
-export function FixMyInternet({
-  lowData,
-  onMeasured,
-}: {
-  lowData: boolean;
-  onMeasured: (result: TestResult) => void;
-}) {
-  const [sessions, setSessions] = useState<DiagnosticSession[]>(loadDiagnosticSessions);
-  const [session, setSession] = useState<DiagnosticSession | null>(() => loadDiagnosticSessions()[0] ?? null);
-  const [conditions, setConditions] = useState<DiagnosticConditions>(() => sessionBaselineConditions(loadDiagnosticSessions()[0]));
-  const [comparison, setComparison] = useState<DiagnosticComparison | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
+type SymptomId = (typeof SYMPTOMS)[number]["id"];
+type Stage = "intro" | "baseline_done" | "awaiting" | "concluded";
+
+export function FixMyInternet() {
+  const [stage, setStage] = useState<Stage>("intro");
+  const [symptom, setSymptom] = useState<SymptomId | null>(null);
+  const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
-  const [running, setRunning] = useState(false);
-  const [dataUsedMB, setDataUsedMB] = useState(0);
   const [liveMbps, setLiveMbps] = useState<number | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const [baseline, setBaseline] = useState<Snapshot | null>(null);
+  const [outcomes, setOutcomes] = useState<StepOutcome[]>([]);
+  const [current, setCurrent] = useState<FixStep | null>(null);
+  const [picking, setPicking] = useState(false);
+  const [sessionId, setSessionId] = useState("");
+  const running = useRef(false);
 
-  const evaluation = useMemo(() => (session ? evaluateDiagnostic(session) : null), [session]);
-  const recommended = session ? recommendedComparisons(session.symptom) : [];
-  const currentKind: DiagnosticRunKind = session?.runs.length ? comparison?.kind ?? "original-room" : "baseline";
-  const canRun = Boolean(session) && !running && (currentKind === "baseline" || Boolean(comparison?.available && confirmed));
+  const doneIds = outcomes.map((o) => o.stepId);
+  const conclusion = baseline ? conclude(baseline, outcomes) : null;
 
-  const begin = (symptom: DiagnosticSymptom) => {
-    const next = createDiagnosticSession(symptom);
-    setSession(next);
-    setConditions(DEFAULT_CONDITIONS);
-    setComparison(null);
-    setConfirmed(false);
-    setMessage("New local diagnostic session created. Describe the baseline conditions before measuring.");
-  };
-
-  const updateSession = (updater: (current: DiagnosticSession) => DiagnosticSession) => {
-    setSession((current) => {
-      if (!current) return current;
-      const next = updater(current);
-      setSessions(saveDiagnosticSession(next));
-      return next;
-    });
-  };
-
-  const selectComparison = (item: DiagnosticComparison) => {
-    setComparison(item);
-    const baseline = session?.runs.find((run) => run.kind === "baseline");
-    setConditions({ ...(baseline?.conditions ?? DEFAULT_CONDITIONS), ...item.changes });
-    setConfirmed(false);
-    setMessage(item.available ? null : item.limitation ?? "Measurement unavailable in this browser.");
-  };
-
-  const executeRun = async () => {
-    if (!session || !canRun) return;
-    setRunning(true);
-    setPhase("preflight");
-    setDataUsedMB(0);
+  const runQuick = useCallback(async (): Promise<TestResult> => {
+    setBusy(true);
     setLiveMbps(null);
-    setMessage(null);
-    const label = currentKind === "baseline" ? "Baseline" : comparison?.shortLabel ?? "Comparison";
     try {
-      const result = await runTest(
-        { lowData },
+      return await runTest(
+        { lowData: true, profile: "quick" },
         {
           onPhase: setPhase,
-          onBytes: (bytes) => setDataUsedMB(bytes / 1_000_000),
-          onSample: (sample) => {
-            if (sample.mbps !== undefined) setLiveMbps(sample.mbps);
+          onSample: (s) => {
+            if (s.mbps !== undefined) setLiveMbps(s.mbps);
           },
         },
       );
-      const run = snapshotDiagnosticRun(result, currentKind, label, conditions);
-      const next = { ...session, updatedAt: Date.now(), runs: [...session.runs, run] };
-      setSession(next);
-      setSessions(saveDiagnosticSession(next));
-      onMeasured(result);
-      setPhase("done");
-      setMessage(buildCompletionMessage(run.kind, run.measurement.observedIpFamily, run.conditions.requestedIpFamily));
-      setComparison(null);
-      setConfirmed(false);
-    } catch (error) {
-      console.error("NetPulse diagnostic measurement failed.", error);
-      setPhase("error");
-      setMessage(error instanceof Error ? `Measurement failed: ${error.message}` : "Measurement failed unexpectedly. No diagnostic run was saved.");
     } finally {
-      setRunning(false);
+      setBusy(false);
+      setPhase("idle");
     }
+  }, []);
+
+  const persist = useCallback(
+    (base: Snapshot, outs: StepOutcome[]) => {
+      saveSession({
+        id: sessionId,
+        startedAt: base.timestamp,
+        baseline: base,
+        outcomes: outs,
+        conclusion: conclude(base, outs),
+      });
+    },
+    [sessionId],
+  );
+
+  const startBaseline = useCallback(async () => {
+    if (running.current) return;
+    running.current = true;
+    setOutcomes([]);
+    setCurrent(null);
+    try {
+      const r = await runQuick();
+      const base = snapshot(r);
+      setSessionId(`fix-${r.timestamp}`);
+      setBaseline(base);
+      setCurrent(recommendStep(base, []));
+      setStage("baseline_done");
+      persist(base, []);
+    } finally {
+      running.current = false;
+    }
+  }, [runQuick, persist]);
+
+  const runComparison = useCallback(async () => {
+    if (running.current || !baseline || !current) return;
+    running.current = true;
+    try {
+      const r = await runQuick();
+      const after = snapshot(r);
+      const outcome = evaluateStep(current.id, baseline, after);
+      const next = [...outcomes, outcome];
+      setOutcomes(next);
+      persist(baseline, next);
+      setCurrent(recommendStep(baseline, next.map((o) => o.stepId)));
+      setStage("awaiting");
+    } finally {
+      running.current = false;
+    }
+  }, [baseline, current, outcomes, runQuick, persist]);
+
+  const reset = () => {
+    setStage("intro");
+    setBaseline(null);
+    setOutcomes([]);
+    setCurrent(null);
+    setSymptom(null);
   };
 
-  const openSession = (selected: DiagnosticSession) => {
-    setSession(selected);
-    setConditions(sessionBaselineConditions(selected));
-    setComparison(null);
-    setConfirmed(false);
-    setMessage("Opened the locally saved diagnostic session.");
-  };
+  const session: FixSession | null = baseline
+    ? { id: sessionId, startedAt: baseline.timestamp, baseline, outcomes, conclusion }
+    : null;
 
-  const removeSession = (id: string) => {
-    const next = deleteDiagnosticSession(id);
-    setSessions(next);
-    const replacement = next[0] ?? null;
-    setSession(replacement);
-    setConditions(sessionBaselineConditions(replacement));
-    setComparison(null);
-  };
+  const symptomLabel = SYMPTOMS.find((s) => s.id === symptom)?.label ?? null;
+  const stepNumber = outcomes.length + 1;
 
   return (
-    <div className="view-stack diagnostic-page">
-      <section className="diagnostic-hero" aria-labelledby="diagnostic-title">
-        <div>
-          <span className="section-kicker">Evidence before advice</span>
-          <h2 id="diagnostic-title">Fix My Internet</h2>
-          <p>
-            Run controlled comparisons, keep every real measurement in one local session, and separate what NetPulse observed from what still needs proof.
-          </p>
-        </div>
-        <div className="diagnostic-hero__trust">
-          <ShieldAlert aria-hidden="true" />
-          <span><strong>No invented diagnoses.</strong> Browser-only limits stay visible, and reports exclude full IPs, SSIDs, and device names.</span>
-        </div>
-      </section>
+    <div className="mx-auto max-w-3xl space-y-10">
+      <PageHeader
+        title="Fix My Internet"
+        description="A guided A/B workflow: measure a baseline, change one thing at a time, and let the numbers show what is actually holding your connection back — including when a faster plan would not help."
+        actions={baseline ? <StatusPill tone="neutral">Step {stepNumber}</StatusPill> : undefined}
+      />
 
-      {!session ? (
-        <SymptomPicker onSelect={begin} />
-      ) : (
+      {busy && (
+        <div
+          className="flex items-center gap-2.5 rounded-xl border border-border bg-card px-5 py-3.5 font-mono text-[12.5px] text-muted-foreground"
+          role="status"
+          aria-live="polite"
+        >
+          <span className="pulse-dot" aria-hidden="true" />
+          Testing… {PHASE_SHORT[phase] ?? "working"}
+          {liveMbps != null && (
+            <strong className="text-foreground">
+              · {liveMbps >= 100 ? Math.round(liveMbps) : liveMbps.toFixed(1)} Mbps
+            </strong>
+          )}
+        </div>
+      )}
+
+      {/* ------------------------------- Intro ------------------------------ */}
+      {stage === "intro" && (
         <>
-          <SessionHeader session={session} onNew={() => setSession(null)} onReport={() => downloadPrivacySafeDiagnosticReport(session)} />
-          <WorkflowStrip session={session} running={running} />
+          <Section
+            title="What are you seeing?"
+            description="This frames the session and travels with the exported report. It does not decide the diagnosis — the recommended tests come from your measurements."
+          >
+            <div className="grid gap-2.5 sm:grid-cols-2">
+              {SYMPTOMS.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => setSymptom(s.id)}
+                  aria-pressed={symptom === s.id}
+                  className={cn(
+                    "rounded-xl border px-4 py-3.5 text-left transition-[border-color,background-color,transform] duration-200 hover:-translate-y-0.5 hover:border-primary/50",
+                    symptom === s.id ? "border-primary/60 bg-primary/[0.08]" : "border-border",
+                  )}
+                >
+                  <span className="block text-[14px] font-medium">{s.label}</span>
+                  <span className="mt-0.5 block text-[12.5px] text-muted-foreground">{s.note}</span>
+                </button>
+              ))}
+            </div>
+          </Section>
 
-          <Tabs defaultValue={session.runs.length === 0 ? "measure" : "evidence"} className="diagnostic-tabs">
-            <TabsList variant="line" aria-label="Diagnostic workflow sections">
-              <TabsTrigger value="measure">Measure</TabsTrigger>
-              <TabsTrigger value="evidence" disabled={session.runs.length === 0}>Evidence</TabsTrigger>
-              <TabsTrigger value="plan" disabled={session.runs.length === 0}>Fix plan</TabsTrigger>
-              <TabsTrigger value="guides">Guides</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="measure" className="diagnostic-tab-content">
-              {session.runs.length === 0 ? (
-                <BaselineSetup
-                  session={session}
-                  conditions={conditions}
-                  onConditions={setConditions}
-                  onPlan={(download, upload) => updateSession((current) => ({ ...current, planDownloadMbps: download, planUploadMbps: upload }))}
-                />
-              ) : (
-                <ComparisonPicker selected={comparison} recommended={recommended} onSelect={selectComparison} />
-              )}
-
-              {comparison && <ComparisonInstructions comparison={comparison} />}
-              {(session.runs.length === 0 || comparison?.available) && (
-                <RunPanel
-                  kind={currentKind}
-                  comparison={comparison}
-                  conditions={conditions}
-                  onConditions={setConditions}
-                  confirmed={confirmed}
-                  onConfirmed={setConfirmed}
-                  phase={phase}
-                  running={running}
-                  dataUsedMB={dataUsedMB}
-                  liveMbps={liveMbps}
-                  lowData={lowData}
-                  canRun={canRun}
-                  onRun={() => void executeRun()}
-                  message={message}
-                />
-              )}
-              {comparison && !comparison.available && <UnavailableComparison comparison={comparison} />}
-              {session.runs.length > 0 && <RunTimeline session={session} />}
-            </TabsContent>
-
-            <TabsContent value="evidence" className="diagnostic-tab-content">
-              {evaluation && <EvidenceView evaluation={evaluation} />}
-            </TabsContent>
-
-            <TabsContent value="plan" className="diagnostic-tab-content">
-              {evaluation && <FixPlan evaluation={evaluation} onReport={() => downloadPrivacySafeDiagnosticReport(session)} />}
-            </TabsContent>
-
-            <TabsContent value="guides" className="diagnostic-tab-content">
-              <GuideLibrary />
-            </TabsContent>
-          </Tabs>
+          <Section title="Measure a baseline">
+            <p className="max-w-2xl text-[13.5px] leading-relaxed text-muted-foreground">
+              Each round runs a light test (~15 MB, ~10 s) so a multi-step session stays cheap on
+              data. After the baseline you will physically make one change — plug in Ethernet, move
+              next to the router, turn off the VPN — and re-test so the two runs can be compared.
+            </p>
+            <Button
+              size="lg"
+              onClick={() => void startBaseline()}
+              disabled={busy}
+              className="h-11 gap-2 transition-transform active:scale-[0.98]"
+            >
+              <Wrench className="size-4" />
+              {busy ? "Measuring baseline…" : "Run baseline test"}
+            </Button>
+          </Section>
         </>
       )}
 
-      {sessions.length > 0 && <SavedSessions sessions={sessions} activeId={session?.id ?? null} onOpen={openSession} onDelete={removeSession} />}
-      <NetPulseFooter />
+      {/* ---------------------------- Session ------------------------------- */}
+      {baseline && (
+        <>
+          {symptomLabel && (
+            <Panel tone="quiet" className="py-3">
+              <p className="text-[13px] text-muted-foreground">
+                Reported symptom: <span className="text-foreground">{symptomLabel}</span>
+              </p>
+            </Panel>
+          )}
+
+          <Section title="Baseline" description="Your starting point — every later run is compared against this.">
+            <StatGrid
+              columns={4}
+              size="sm"
+              stats={[
+                { label: "Download", value: `${baseline.downloadMbps.toFixed(0)} Mbps` },
+                { label: "Upload", value: `${baseline.uploadMbps.toFixed(0)} Mbps` },
+                { label: "Idle latency", value: `${Math.round(baseline.idlePingMs)} ms` },
+                {
+                  label: "Loaded ↓/↑",
+                  value: `${Math.round(baseline.loadedDownPingMs)}/${Math.round(baseline.loadedUpPingMs)} ms`,
+                },
+                { label: "Jitter", value: `${baseline.jitterMs.toFixed(1)} ms` },
+                { label: "Bufferbloat", value: baseline.bufferbloatGrade },
+                { label: "Stability", value: `${baseline.stabilityScore}/100` },
+                { label: "Rounds run", value: String(outcomes.length + 1) },
+              ]}
+            />
+          </Section>
+
+          {/* Evidence timeline */}
+          {outcomes.length > 0 && (
+            <Section title="Evidence timeline" description="Each change you made, and what the measurements did.">
+              <ol className="space-y-4">
+                {outcomes.map((o, i) => (
+                  <OutcomeItem key={o.stepId + o.after.timestamp} outcome={o} index={i + 1} />
+                ))}
+              </ol>
+            </Section>
+          )}
+
+          {/* Next guided step */}
+          {stage !== "concluded" && current && (
+            <Section title="Recommended next test">
+              <Panel tone="accent" className="space-y-4">
+                <div className="space-y-1.5">
+                  <h3 className="text-[17px] font-semibold tracking-tight">{current.label}</h3>
+                  <p className="text-[13.5px] leading-relaxed text-muted-foreground">{current.why}</p>
+                </div>
+
+                <div className="rounded-lg bg-background/60 px-4 py-3">
+                  <p className="text-[13.5px] leading-relaxed">
+                    <strong className="font-semibold">Do this:</strong> {current.instruction}
+                  </p>
+                </div>
+
+                <p className="text-[12.5px] text-muted-foreground">{current.isolates}</p>
+
+                <div className="flex flex-wrap gap-2.5">
+                  <Button onClick={() => void runComparison()} disabled={busy} className="gap-2">
+                    I've done it — run comparison <ArrowRight className="size-4" />
+                  </Button>
+                  <Button variant="outline" onClick={() => setPicking((p) => !p)} disabled={busy}>
+                    Choose a different change
+                  </Button>
+                </div>
+
+                {picking && (
+                  <ul className="divide-y divide-border/70 rounded-lg border border-border bg-card">
+                    {remainingSteps(doneIds).map((s) => (
+                      <li key={s.id}>
+                        <button
+                          className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left transition-colors hover:bg-accent"
+                          onClick={() => {
+                            setCurrent({ ...s });
+                            setPicking(false);
+                          }}
+                        >
+                          <span className="text-[13.5px] font-medium">{s.label}</span>
+                          <span className="hidden text-right text-[12px] text-muted-foreground sm:block">
+                            {s.isolates}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Panel>
+            </Section>
+          )}
+
+          {stage !== "concluded" && outcomes.length === 0 && !current && (
+            <EmptyState
+              title="No further comparisons to suggest"
+              description="Every isolation step has been tried. Finish the session to see the conclusion."
+            />
+          )}
+
+          {stage !== "concluded" && outcomes.length > 0 && (
+            <Button variant="outline" onClick={() => setStage("concluded")} disabled={busy} className="gap-2">
+              Finish &amp; see conclusion <ArrowRight className="size-4" />
+            </Button>
+          )}
+
+          {stage === "concluded" && conclusion && session && (
+            <Conclusion conclusion={conclusion} session={session} symptom={symptomLabel} onReset={reset} />
+          )}
+        </>
+      )}
     </div>
   );
 }
 
-function SymptomPicker({ onSelect }: { onSelect: (symptom: DiagnosticSymptom) => void }) {
-  return (
-    <Card className="page-card">
-      <CardHeader>
-        <span className="section-kicker">Step 1</span>
-        <CardTitle>What are you experiencing?</CardTitle>
-        <CardDescription>The symptom chooses the most useful comparisons; it never predetermines the diagnosis.</CardDescription>
-      </CardHeader>
-      <CardContent className="symptom-grid">
-        {SYMPTOMS.map((symptom) => {
-          const Icon = SYMPTOM_ICONS[symptom.id];
-          return (
-            <button key={symptom.id} className="symptom-card" onClick={() => onSelect(symptom.id)}>
-              <Icon aria-hidden="true" />
-              <span><strong>{symptom.label}</strong><small>{symptom.description}</small></span>
-              <ArrowRight aria-hidden="true" />
-            </button>
-          );
-        })}
-      </CardContent>
-    </Card>
-  );
-}
+/* ------------------------------ Outcome item ------------------------------ */
 
-function SessionHeader({ session, onNew, onReport }: { session: DiagnosticSession; onNew: () => void; onReport: () => void }) {
-  const symptom = SYMPTOMS.find((item) => item.id === session.symptom);
+function OutcomeItem({ outcome, index }: { outcome: StepOutcome; index: number }) {
+  const deltas = compare(outcome.before, outcome.after);
+  const Icon = outcome.helped ? CheckCircle2 : MinusCircle;
+
   return (
-    <Card className="page-card session-header-card">
-      <CardContent className="session-header">
-        <div>
-          <span className="section-kicker">Current session</span>
-          <h3>{symptom?.label ?? "Diagnostic session"}</h3>
-          <p>{session.runs.length} measured run{session.runs.length === 1 ? "" : "s"} · saved only in this browser</p>
+    <li className="rounded-xl border border-border bg-card">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-border/70 px-5 py-3.5">
+        <span className="font-mono text-[12px] text-muted-foreground">{String(index).padStart(2, "0")}</span>
+        <Icon
+          className={cn("size-4 shrink-0", outcome.helped ? "text-status-good" : "text-muted-foreground")}
+          aria-hidden="true"
+        />
+        <span className="text-[14.5px] font-medium">{outcome.label}</span>
+        <StatusPill tone={outcome.helped ? "good" : "unknown"} className="ml-auto">
+          {outcome.helped ? "Helped" : "Little change"}
+        </StatusPill>
+      </div>
+
+      <div className="px-5 py-4">
+        <p className="text-[13.5px] leading-relaxed text-muted-foreground">{outcome.headline}</p>
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full min-w-[26rem] border-collapse text-[13px]">
+            <thead>
+              <tr className="text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
+                <th className="pb-2 font-medium">Metric</th>
+                <th className="pb-2 text-right font-medium">Before</th>
+                <th className="pb-2 text-right font-medium">After</th>
+                <th className="pb-2 text-right font-medium">Change</th>
+              </tr>
+            </thead>
+            <tbody>
+              {deltas.map((d) => (
+                <tr key={d.key} className="border-t border-border/60">
+                  <td className="py-2">{d.label}</td>
+                  <td className="py-2 text-right font-mono tabular-nums text-muted-foreground">
+                    {d.before.toFixed(1)}
+                  </td>
+                  <td className="py-2 text-right font-mono tabular-nums">{d.after.toFixed(1)}</td>
+                  <td
+                    className={cn(
+                      "py-2 text-right font-mono tabular-nums",
+                      d.before === d.after
+                        ? "text-muted-foreground"
+                        : d.better
+                          ? "text-status-good"
+                          : "text-status-warn",
+                    )}
+                  >
+                    {d.deltaPct >= 0 ? "+" : ""}
+                    {d.deltaPct.toFixed(0)}%
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-        <div className="session-header__actions">
-          {session.runs.length > 0 && <Button variant="outline" onClick={onReport}><FileDown aria-hidden="true" /> Privacy-safe report</Button>}
-          <Button variant="secondary" onClick={onNew}><Sparkles aria-hidden="true" /> New session</Button>
-        </div>
-      </CardContent>
-    </Card>
+      </div>
+    </li>
   );
 }
 
-function WorkflowStrip({ session, running }: { session: DiagnosticSession; running: boolean }) {
-  const steps = [
-    { label: "Symptom", done: true },
-    { label: "Baseline", done: session.runs.some((run) => run.kind === "baseline") },
-    { label: "Compare", done: session.runs.length >= 2 },
-    { label: "Act & retest", done: session.runs.length >= 3 },
-  ];
-  return (
-    <ol className="workflow-strip" aria-label="Diagnostic progress">
-      {steps.map((step, index) => (
-        <li key={step.label} data-complete={step.done || undefined} data-active={!step.done && steps.slice(0, index).every((item) => item.done) || undefined}>
-          <span>{step.done ? <CheckCircle2 aria-hidden="true" /> : index + 1}</span>
-          <strong>{step.label}</strong>
-          {running && !step.done && <small>In progress</small>}
-        </li>
-      ))}
-    </ol>
-  );
-}
+/* ------------------------------- Conclusion ------------------------------- */
 
-function BaselineSetup({
+function Conclusion({
+  conclusion,
   session,
-  conditions,
-  onConditions,
-  onPlan,
+  symptom,
+  onReset,
 }: {
-  session: DiagnosticSession;
-  conditions: DiagnosticConditions;
-  onConditions: (conditions: DiagnosticConditions) => void;
-  onPlan: (download: number | null, upload: number | null) => void;
+  conclusion: NonNullable<FixSession["conclusion"]>;
+  session: FixSession;
+  symptom: string | null;
+  onReset: () => void;
 }) {
-  return (
-    <Card className="page-card">
-      <CardHeader>
-        <span className="section-kicker">Step 2 · Baseline</span>
-        <CardTitle>Record the problem condition</CardTitle>
-        <CardDescription>These labels are user-confirmed context. NetPulse will measure performance, but cannot inspect the router or reliably detect the link or VPN.</CardDescription>
-      </CardHeader>
-      <CardContent className="baseline-layout">
-        <ConditionEditor conditions={conditions} onChange={onConditions} />
-        <div className="plan-reference">
-          <div><strong>Optional plan reference</strong><small>Used only to decide whether repeated Ethernet tests warrant provider investigation. It is not treated as measured speed.</small></div>
-          <label htmlFor="plan-download">Advertised download (Mbps)</label>
-          <Input id="plan-download" type="number" min="1" inputMode="decimal" defaultValue={session.planDownloadMbps ?? ""} onBlur={(event) => onPlan(toPositiveNumber(event.target.value), session.planUploadMbps)} />
-          <label htmlFor="plan-upload">Advertised upload (Mbps)</label>
-          <Input id="plan-upload" type="number" min="1" inputMode="decimal" defaultValue={session.planUploadMbps ?? ""} onBlur={(event) => onPlan(session.planDownloadMbps, toPositiveNumber(event.target.value))} />
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
+  const [copied, setCopied] = useState(false);
+  const stamp = new Date(session.startedAt).toISOString().replace(/[:.]/g, "-");
 
-function ComparisonPicker({
-  selected,
-  recommended,
-  onSelect,
-}: {
-  selected: DiagnosticComparison | null;
-  recommended: DiagnosticRunKind[];
-  onSelect: (comparison: DiagnosticComparison) => void;
-}) {
-  const ordered = [...COMPARISONS].sort((a, b) => Number(recommended.includes(b.kind)) - Number(recommended.includes(a.kind)));
-  return (
-    <Card className="page-card">
-      <CardHeader>
-        <span className="section-kicker">Controlled comparisons</span>
-        <CardTitle>Change one condition</CardTitle>
-        <CardDescription>Recommended tests appear first. A comparison only supports a cause when the run quality and conditions are compatible.</CardDescription>
-      </CardHeader>
-      <CardContent className="comparison-grid">
-        {ordered.map((item) => (
-          <button
-            key={item.kind}
-            className="comparison-card"
-            data-selected={selected?.kind === item.kind || undefined}
-            data-unavailable={!item.available || undefined}
-            onClick={() => onSelect(item)}
-          >
-            <span className="comparison-card__icon">{comparisonIcon(item.kind)}</span>
-            <span><strong>{item.title}</strong><small>{item.why}</small></span>
-            <span className="comparison-card__badges">
-              {recommended.includes(item.kind) && <Badge>Recommended</Badge>}
-              {!item.available && <Badge variant="outline">Unavailable</Badge>}
-            </span>
-          </button>
-        ))}
-      </CardContent>
-    </Card>
-  );
-}
+  const upgradeTone: "good" | "warn" | "unknown" =
+    conclusion.ispUpgradeHelps === "unlikely" ? "good" : conclusion.ispUpgradeHelps === "possibly" ? "warn" : "unknown";
 
-function ComparisonInstructions({ comparison }: { comparison: DiagnosticComparison }) {
   return (
-    <Card className="page-card comparison-instructions">
-      <CardHeader><CardTitle>{comparison.title}</CardTitle><CardDescription>{comparison.why}</CardDescription></CardHeader>
-      <CardContent>
-        <ol>{comparison.instructions.map((instruction) => <li key={instruction}>{instruction}</li>)}</ol>
-        {comparison.limitation && <p className="measurement-limitation"><TriangleAlert aria-hidden="true" /> {comparison.limitation}</p>}
-      </CardContent>
-    </Card>
-  );
-}
-
-function RunPanel({
-  kind,
-  comparison,
-  conditions,
-  onConditions,
-  confirmed,
-  onConfirmed,
-  phase,
-  running,
-  dataUsedMB,
-  liveMbps,
-  lowData,
-  canRun,
-  onRun,
-  message,
-}: {
-  kind: DiagnosticRunKind;
-  comparison: DiagnosticComparison | null;
-  conditions: DiagnosticConditions;
-  onConditions: (conditions: DiagnosticConditions) => void;
-  confirmed: boolean;
-  onConfirmed: (confirmed: boolean) => void;
-  phase: Phase;
-  running: boolean;
-  dataUsedMB: number;
-  liveMbps: number | null;
-  lowData: boolean;
-  canRun: boolean;
-  onRun: () => void;
-  message: string | null;
-}) {
-  const phaseDetail = PHASE_DETAILS[phase];
-  const baseline = kind === "baseline";
-  return (
-    <Card className="page-card run-panel">
-      <CardHeader>
-        <span className="section-kicker">{baseline ? "Real baseline measurement" : "Real comparison measurement"}</span>
-        <CardTitle>{baseline ? "Measure this condition" : comparison?.shortLabel}</CardTitle>
-        <CardDescription>Uses the same measured NetPulse pipeline as Speed Test. Stage progress is discrete pipeline state, not simulated completion time.</CardDescription>
-      </CardHeader>
-      <CardContent className="run-panel__content">
-        <ConditionEditor conditions={conditions} onChange={onConditions} compact />
-        {!baseline && (
-          <label className="confirmation-row">
-            <span><strong>I set the comparison conditions</strong><small>The browser cannot verify physical location, Ethernet use, VPN state, other devices, or paused household traffic.</small></span>
-            <Switch checked={confirmed} onCheckedChange={onConfirmed} aria-label="Confirm comparison conditions are set" />
-          </label>
-        )}
-        {(running || phase === "done" || phase === "error") && (
-          <div className="measurement-progress" role="status" aria-live="polite">
-            <ArcProgress value={phaseDetail.progress} label={phaseDetail.label} aria-label={`${phaseDetail.label}: ${phaseDetail.progress}% of pipeline stages entered`} />
-            <div><strong>{phaseDetail.label}</strong><span>{liveMbps === null ? "Waiting for a throughput sample" : `${formatSpeed(liveMbps)} Mbps live`} · {dataUsedMB.toFixed(1)} MB transferred</span></div>
+    <div className="space-y-8">
+      <Section title="Likely cause">
+        <Panel className="space-y-4">
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
+            <p className="text-[20px] font-semibold tracking-tight">{conclusion.bottleneck}</p>
+            <StatusPill tone="neutral">Confidence {conclusion.confidence}%</StatusPill>
           </div>
-        )}
-        {message && <p className={phase === "error" ? "run-message run-message--error" : "run-message"}>{message}</p>}
-      </CardContent>
-      <CardFooter className="run-panel__footer">
-        <div><strong>{lowData ? "Low-data profile" : "Full profile"}</strong><small>Configured in Settings. The completed run records actual duration, samples, bytes, endpoint, and confidence.</small></div>
-        <Button size="lg" disabled={!canRun} onClick={onRun}><Play aria-hidden="true" /> {running ? "Measuring…" : baseline ? "Run baseline" : "Run comparison"}</Button>
-      </CardFooter>
-    </Card>
-  );
-}
+          <p className="text-[14px] leading-relaxed text-muted-foreground">{conclusion.summary}</p>
+          <KeyValueList
+            items={[
+              ...(symptom ? [{ k: "Reported symptom", v: symptom, mono: false }] : []),
+              { k: "Comparisons run", v: String(session.outcomes.length) },
+            ]}
+          />
+        </Panel>
+      </Section>
 
-function ConditionEditor({ conditions, onChange, compact = false }: { conditions: DiagnosticConditions; onChange: (conditions: DiagnosticConditions) => void; compact?: boolean }) {
-  const set = <K extends keyof DiagnosticConditions>(key: K, value: DiagnosticConditions[K]) => onChange({ ...conditions, [key]: value });
-  return (
-    <div className={compact ? "condition-grid condition-grid--compact" : "condition-grid"}>
-      <ConditionSelect label="Connection" value={conditions.link} options={["wifi", "ethernet", "unknown"]} onValue={(value) => set("link", value as DiagnosticConditions["link"])} />
-      <ConditionSelect label="Location" value={conditions.location} options={["usual", "near-router", "unknown"]} onValue={(value) => set("location", value as DiagnosticConditions["location"])} />
-      <ConditionSelect label="VPN" value={conditions.vpn} options={["on", "off", "unknown"]} onValue={(value) => set("vpn", value as DiagnosticConditions["vpn"])} />
-      <ConditionSelect label="Other traffic" value={conditions.backgroundTraffic} options={["normal", "paused", "unknown"]} onValue={(value) => set("backgroundTraffic", value as DiagnosticConditions["backgroundTraffic"])} />
-      <ConditionSelect label="Device" value={conditions.device} options={["primary", "other"]} onValue={(value) => set("device", value as DiagnosticConditions["device"])} />
-      <ConditionSelect label="Time" value={conditions.time} options={["usual", "peak", "off-peak"]} onValue={(value) => set("time", value as DiagnosticConditions["time"])} />
+      <Section title="Would a faster plan help?" actions={<StatusPill tone={upgradeTone}>{conclusion.ispUpgradeHelps}</StatusPill>}>
+        <p className="text-[14px] leading-relaxed text-muted-foreground">{conclusion.ispNote}</p>
+      </Section>
+
+      {conclusion.evidence.length > 0 && (
+        <Section title="Prioritised fixes" description="Ordered by what your own measurements support.">
+          <ol className="space-y-3">
+            {conclusion.evidence.map((e, i) => (
+              <li key={e} className="flex gap-3.5 text-[14px] leading-relaxed">
+                <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-secondary font-mono text-[11px] text-secondary-foreground">
+                  {i + 1}
+                </span>
+                <span>{e}</span>
+              </li>
+            ))}
+          </ol>
+        </Section>
+      )}
+
+      <Section title="Save or share this report">
+        <div className="flex flex-wrap gap-2.5">
+          <Button
+            variant="outline"
+            className="gap-1.5"
+            onClick={async () => {
+              try {
+                const header = symptom ? `Reported symptom: ${symptom}\n\n` : "";
+                await navigator.clipboard.writeText(header + buildFixReport(session));
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1600);
+              } catch {
+                setCopied(false);
+              }
+            }}
+          >
+            <Share2 className="size-3.5" /> {copied ? "Copied ✓" : "Copy report"}
+          </Button>
+          <Button
+            variant="outline"
+            className="gap-1.5"
+            onClick={() =>
+              downloadText(
+                `netpulse-fix-${stamp}.json`,
+                JSON.stringify(fixSessionExport(session), null, 2),
+                "application/json",
+              )
+            }
+          >
+            <FileJson className="size-3.5" /> JSON
+          </Button>
+          <Button
+            variant="outline"
+            className="gap-1.5"
+            onClick={() => downloadCsv(`netpulse-fix-${stamp}.csv`, fixCsvRows(session))}
+          >
+            <FileSpreadsheet className="size-3.5" /> CSV
+          </Button>
+          <Button variant="ghost" onClick={onReset} className="gap-1.5 text-muted-foreground">
+            <RotateCcw className="size-3.5" /> Start over
+          </Button>
+        </div>
+      </Section>
     </div>
   );
 }
 
-function ConditionSelect({ label, value, options, onValue }: { label: string; value: string; options: string[]; onValue: (value: string) => void }) {
-  return (
-    <label className="condition-field"><span>{label}</span><Select value={value} onValueChange={onValue}><SelectTrigger aria-label={label}><SelectValue /></SelectTrigger><SelectContent>{options.map((option) => <SelectItem key={option} value={option}>{humanize(option)}</SelectItem>)}</SelectContent></Select></label>
-  );
-}
-
-function UnavailableComparison({ comparison }: { comparison: DiagnosticComparison }) {
-  return (
-    <Card className="page-card unavailable-card">
-      <CardContent><FlaskConical aria-hidden="true" /><div><strong>Measurement unavailable in this browser</strong><p>{comparison.limitation}</p><p>No substitute value, simulated run, or diagnosis will be generated.</p></div></CardContent>
-    </Card>
-  );
-}
-
-function RunTimeline({ session }: { session: DiagnosticSession }) {
-  return (
-    <Card className="page-card">
-      <CardHeader><CardTitle>Session evidence</CardTitle><CardDescription>Every entry below came from a completed NetPulse measurement.</CardDescription></CardHeader>
-      <CardContent>
-        <ArcTimeline className="diagnostic-timeline">
-          {session.runs.map((run) => (
-            <ArcTimelineItem key={run.id} heading={run.label} date={new Date(run.measuredAt).toLocaleString()}>
-              <div className="timeline-metrics">
-                <span><strong>{formatSpeed(run.measurement.downloadMbps)}</strong> Mbps down</span>
-                <span><strong>{formatSpeed(run.measurement.uploadMbps)}</strong> Mbps up</span>
-                <span><strong>{Math.round(run.measurement.idleLatencyMs)}</strong> ms idle</span>
-                <span><strong>{Math.round(run.measurement.confidenceScore)}%</strong> confidence</span>
-              </div>
-              <dl className="run-metadata">
-                <div><dt>Loaded latency</dt><dd>{Math.round(run.measurement.loadedDownMs)} ms down / {Math.round(run.measurement.loadedUpMs)} ms up</dd></div>
-                <div><dt>Jitter / stability</dt><dd>{Math.round(run.measurement.jitterMs)} ms / {Math.round(run.measurement.stabilityScore)}/100</dd></div>
-                <div><dt>Samples</dt><dd>{run.measurement.idleSamples} idle / {run.measurement.loadedDownSamples} down-loaded / {run.measurement.loadedUpSamples} up-loaded</dd></div>
-                <div><dt>Test profile</dt><dd>{(run.measurement.durationMs / 1000).toFixed(1)} s / {run.measurement.dataUsedMB.toFixed(1)} MB transferred</dd></div>
-                <div><dt>Endpoint</dt><dd>{run.measurement.endpointProvider} {run.measurement.endpointEdge ?? "edge unavailable"} · {run.measurement.endpointProtocol} · observed {run.measurement.observedIpFamily}</dd></div>
-              </dl>
-            </ArcTimelineItem>
-          ))}
-        </ArcTimeline>
-      </CardContent>
-    </Card>
-  );
-}
-
-function EvidenceView({ evaluation }: { evaluation: ReturnType<typeof evaluateDiagnostic> }) {
-  return (
-    <div className="section-stack">
-      <Card className="page-card evidence-summary-card">
-        <CardHeader><span className="section-kicker">Deterministic evaluation</span><CardTitle>{evaluation.summary}</CardTitle><CardDescription>Rules use explicit thresholds documented below. “Possible” means the required comparison is missing or ownership remains ambiguous.</CardDescription></CardHeader>
-        <CardContent className="priority-findings">
-          {evaluation.prioritized.length === 0 ? <div className="honest-empty">No cause is supported yet. Run the next controlled comparison.</div> : evaluation.prioritized.map((item) => <FindingCard key={item.id} finding={item} />)}
-        </CardContent>
-      </Card>
-      <Card className="page-card">
-        <CardHeader><CardTitle>All evaluated causes</CardTitle><CardDescription>Unsupported and unavailable causes stay visible so absence of evidence is not mistaken for a pass.</CardDescription></CardHeader>
-        <CardContent><AssessmentAccordion assessments={evaluation.assessments} /></CardContent>
-      </Card>
-    </div>
-  );
-}
-
-function FindingCard({ finding }: { finding: CauseAssessment }) {
-  return (
-    <article className="finding-card" data-state={finding.state}>
-      <div className="finding-card__head"><span>{stateIcon(finding.state)}</span><div><Badge variant={finding.state === "supported" ? "default" : "outline"}>{humanize(finding.state)}</Badge><h3>{finding.title}</h3></div><strong>{finding.confidence}%<small>confidence</small></strong></div>
-      <p>{finding.evidence[0]}</p>
-      <Separator />
-      <dl>
-        <div><dt>Alternative</dt><dd>{finding.alternatives.join(" ")}</dd></div>
-        <div><dt>Next test</dt><dd>{finding.nextTest}</dd></div>
-        <div><dt>Action</dt><dd>{finding.action}</dd></div>
-        <div><dt>Unlikely to help</dt><dd>{finding.unlikelyToHelp}</dd></div>
-      </dl>
-    </article>
-  );
-}
-
-function AssessmentAccordion({ assessments }: { assessments: CauseAssessment[] }) {
-  return (
-    <Accordion type="multiple" className="assessment-accordion">
-      {assessments.map((item) => (
-        <AccordionItem key={item.id} value={item.id}>
-          <AccordionTrigger><span className="assessment-title">{stateIcon(item.state)}<span><strong>{item.title}</strong><small>{humanize(item.state)} · {item.confidence}% confidence</small></span></span></AccordionTrigger>
-          <AccordionContent>
-            <div className="assessment-detail">
-              <DetailList title="Evidence" items={item.evidence} />
-              <DetailList title="Alternatives" items={item.alternatives} />
-              <div><h4>Next test</h4><p>{item.nextTest}</p></div>
-              <div><h4>Action</h4><p>{item.action}</p></div>
-              <div><h4>Unlikely to help</h4><p>{item.unlikelyToHelp}</p></div>
-              <div className="method-rule"><h4>Decision rule</h4><p>{item.methodology}</p></div>
-            </div>
-          </AccordionContent>
-        </AccordionItem>
-      ))}
-    </Accordion>
-  );
-}
-
-function DetailList({ title, items }: { title: string; items: string[] }) {
-  return <div><h4>{title}</h4><ul>{items.map((item) => <li key={item}>{item}</li>)}</ul></div>;
-}
-
-function FixPlan({ evaluation, onReport }: { evaluation: ReturnType<typeof evaluateDiagnostic>; onReport: () => void }) {
-  return (
-    <div className="section-stack">
-      <Card className="page-card">
-        <CardHeader><span className="section-kicker">Prioritized and verifiable</span><CardTitle>Fix plan</CardTitle><CardDescription>Each action includes the evidence behind it and the retest needed to verify improvement.</CardDescription></CardHeader>
-        <CardContent><ol className="fix-plan-list">{evaluation.fixPlan.map((item, index) => <li key={`${item.title}-${index}`}><span>{index + 1}</span><div><h3>{item.title}</h3><p>{item.reason}</p><small><RefreshCcw aria-hidden="true" /> {item.verify}</small></div></li>)}</ol></CardContent>
-        <CardFooter className="fix-plan-footer"><Button onClick={onReport}><FileDown aria-hidden="true" /> Download privacy-safe report</Button></CardFooter>
-      </Card>
-      <Card className="page-card purchase-guidance"><CardContent><Info aria-hidden="true" /><div><strong>Before buying anything</strong><p>{evaluation.purchaseGuidance}</p></div></CardContent></Card>
-    </div>
-  );
-}
-
-function GuideLibrary() {
-  return (
-    <Card className="page-card">
-      <CardHeader><span className="section-kicker">Networking concepts</span><CardTitle>Guide library</CardTitle><CardDescription>Short explanations with primary or official references. Device-specific menu paths are omitted unless an official manufacturer source is available.</CardDescription></CardHeader>
-      <CardContent>
-        <Accordion type="single" collapsible className="guide-accordion">
-          {GUIDES.map((guide) => (
-            <AccordionItem key={guide.id} value={guide.id}>
-              <AccordionTrigger><span><strong>{guide.title}</strong><small>{guide.summary}</small></span></AccordionTrigger>
-              <AccordionContent><div className="guide-body">{guide.body.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}<a href={guide.sourceUrl} target="_blank" rel="noopener noreferrer">Official reference: {guide.sourceLabel} <ArrowRight aria-hidden="true" /></a></div></AccordionContent>
-            </AccordionItem>
-          ))}
-        </Accordion>
-      </CardContent>
-    </Card>
-  );
-}
-
-function SavedSessions({ sessions, activeId, onOpen, onDelete }: { sessions: DiagnosticSession[]; activeId: string | null; onOpen: (session: DiagnosticSession) => void; onDelete: (id: string) => void }) {
-  return (
-    <Card className="page-card">
-      <CardHeader><CardTitle>Saved diagnostic sessions</CardTitle><CardDescription>Up to 12 sessions are kept in local browser storage. Deleting one cannot be undone.</CardDescription></CardHeader>
-      <CardContent className="saved-session-list">
-        {sessions.map((session) => {
-          const symptom = SYMPTOMS.find((item) => item.id === session.symptom)?.label ?? session.symptom;
-          return <div key={session.id} data-active={activeId === session.id || undefined}><button onClick={() => onOpen(session)}><strong>{symptom}</strong><small>{new Date(session.updatedAt).toLocaleString()} · {session.runs.length} run{session.runs.length === 1 ? "" : "s"}</small></button><Button variant="ghost" size="icon" onClick={() => onDelete(session.id)} aria-label={`Delete ${symptom} diagnostic session`}><Trash2 aria-hidden="true" /></Button></div>;
-        })}
-      </CardContent>
-    </Card>
-  );
-}
-
-function comparisonIcon(kind: DiagnosticRunKind) {
-  if (kind === "ethernet") return <EthernetPort aria-hidden="true" />;
-  if (kind === "near-router" || kind === "original-room") return <Wifi aria-hidden="true" />;
-  if (kind === "other-device") return <Laptop aria-hidden="true" />;
-  if (kind === "router-restarted" || kind === "modem-restarted") return <Router aria-hidden="true" />;
-  if (kind === "peak-time" || kind === "off-peak") return <Clock3 aria-hidden="true" />;
-  if (kind === "vpn-off") return <ShieldAlert aria-hidden="true" />;
-  return <ListChecks aria-hidden="true" />;
-}
-
-function stateIcon(state: AssessmentState) {
-  if (state === "supported") return <CheckCircle2 aria-hidden="true" />;
-  if (state === "not-supported") return <XCircle aria-hidden="true" />;
-  if (state === "unavailable") return <FlaskConical aria-hidden="true" />;
-  return <TriangleAlert aria-hidden="true" />;
-}
-
-function sessionBaselineConditions(session: DiagnosticSession | null | undefined): DiagnosticConditions {
-  return session?.runs.find((run) => run.kind === "baseline")?.conditions ?? DEFAULT_CONDITIONS;
-}
-
-function buildCompletionMessage(kind: DiagnosticRunKind, observed: "IPv4" | "IPv6" | "unknown", requested: DiagnosticConditions["requestedIpFamily"]): string {
-  if ((kind === "ipv4" && observed !== "IPv4") || (kind === "ipv6" && observed !== "IPv6")) {
-    return `Run saved, but the provider trace reported ${observed}; it is not valid as a forced ${requested.toUpperCase()} comparison.`;
-  }
-  return "Real measurement saved to this local diagnostic session. Review Evidence for deterministic rule updates.";
-}
-
-function toPositiveNumber(value: string): number | null {
-  if (value.trim() === "") return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-}
-
-function humanize(value: string): string {
-  return value.replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function formatSpeed(value: number): string {
-  return value >= 100 ? String(Math.round(value)) : value.toFixed(1);
-}
+export type { StepId };

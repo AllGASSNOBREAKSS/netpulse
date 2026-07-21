@@ -7,6 +7,8 @@ export type HistoryEntry = {
   grade: string;
   score: number;
   dataMB: number;
+  isp?: string;
+  server?: string;
   confidence?: number;
   loadedDownMs?: number;
   loadedUpMs?: number;
@@ -50,6 +52,8 @@ function isHistoryEntry(value: unknown): value is HistoryEntry {
     typeof entry.grade === "string" &&
     typeof entry.score === "number" &&
     typeof entry.dataMB === "number" &&
+    optionalString(entry.isp) &&
+    optionalString(entry.server) &&
     optionalNumber(entry.confidence) &&
     optionalNumber(entry.loadedDownMs) &&
     optionalNumber(entry.loadedUpMs) &&
@@ -63,4 +67,8 @@ function isHistoryEntry(value: unknown): value is HistoryEntry {
 
 function optionalNumber(value: unknown): boolean {
   return value === undefined || typeof value === "number" && Number.isFinite(value);
+}
+
+function optionalString(value: unknown): boolean {
+  return value === undefined || typeof value === "string";
 }
