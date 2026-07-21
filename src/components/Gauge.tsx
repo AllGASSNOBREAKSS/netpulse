@@ -1,5 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { useReducedMotion } from "@/hooks/use-reduced-motion";
+import type { CSSProperties } from "react";
 import {
   SPEEDOMETER_BANDS,
   SPEEDOMETER_CEILING_MBPS,
@@ -46,98 +45,25 @@ const formatValue = (value: number) => (value >= 100 ? String(Math.round(value))
 
 export function Gauge({
   label,
-  liveMbps,
+  valueMbps,
   active,
-  waiting,
   done,
+  hasMeasured,
   finalMbps,
 }: {
   label: string;
-  liveMbps: number | null;
+  valueMbps: number;
   active: boolean;
-  waiting: boolean;
   done: boolean;
+  hasMeasured: boolean;
   finalMbps: number | null;
 }) {
-  const reducedMotion = useReducedMotion();
-  const [display, setDisplay] = useState(0);
-  const valueRef = useRef(0);
-  const renderedRef = useRef(0);
-  const targetRef = useRef(0);
-  const armedRef = useRef(false);
-
-  const hasMeasured = liveMbps !== null || (done && finalMbps !== null);
-  const target = done && finalMbps !== null ? finalMbps : liveMbps ?? 0;
-  const armed = waiting && !active && !done;
-
-  useEffect(() => {
-    if (armed && !armedRef.current) {
-      valueRef.current = 0;
-      renderedRef.current = 0;
-      targetRef.current = 0;
-      setDisplay(0);
-    }
-    armedRef.current = armed;
-  }, [armed]);
-
-  useEffect(() => {
-    targetRef.current = Math.max(0, target);
-    if (reducedMotion) {
-      valueRef.current = targetRef.current;
-      renderedRef.current = targetRef.current;
-      setDisplay(targetRef.current);
-    }
-  }, [reducedMotion, target]);
-
-  useEffect(() => {
-    if (reducedMotion) return;
-    let animationFrame = 0;
-    let previousTime = performance.now();
-
-    const tick = (time: number) => {
-      const elapsedSeconds = Math.min((time - previousTime) / 1000, 0.05);
-      previousTime = time;
-      const current = valueRef.current;
-      const nextTarget = targetRef.current;
-      const timeConstant = nextTarget >= current ? 0.34 : 0.58;
-      const blend = 1 - Math.exp(-elapsedSeconds / timeConstant);
-      const next = Math.abs(nextTarget - current) < 0.025
-        ? nextTarget
-        : current + (nextTarget - current) * blend;
-      valueRef.current = next;
-
-      const reachedTarget = next === nextTarget && renderedRef.current !== nextTarget;
-      if (Math.abs(next - renderedRef.current) >= 0.02 || reachedTarget) {
-        renderedRef.current = next;
-        setDisplay(next);
-      }
-      animationFrame = requestAnimationFrame(tick);
-    };
-
-    animationFrame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(animationFrame);
-  }, [reducedMotion]);
-
-  useEffect(() => {
-    if (reducedMotion) return;
-    const syncVisibleValue = () => {
-      if (document.visibilityState !== "visible") return;
-      const measuredTarget = targetRef.current;
-      valueRef.current = measuredTarget;
-      renderedRef.current = measuredTarget;
-      setDisplay(measuredTarget);
-    };
-    document.addEventListener("visibilitychange", syncVisibleValue);
-    return () => document.removeEventListener("visibilitychange", syncVisibleValue);
-  }, [reducedMotion]);
-
-  const visualValue = reducedMotion ? target : display;
-  const fraction = speedToDialFraction(visualValue);
+  const fraction = speedToDialFraction(valueMbps);
   const angle = START + fraction * SWEEP;
-  const currentBand = speedBand(visualValue);
+  const currentBand = speedBand(valueMbps);
   const speedColor = BAND_COLORS[currentBand];
   const idle = !active && !done && !hasMeasured;
-  const numeral = formatValue(visualValue);
+  const numeral = formatValue(valueMbps);
   const [capX, capY] = polar(angle, R_ARC);
 
   const status = done && finalMbps !== null
@@ -145,7 +71,7 @@ export function Gauge({
     : active
       ? "measuring"
       : hasMeasured
-        ? `${formatValue(visualValue)} megabits per second`
+        ? `${formatValue(valueMbps)} megabits per second`
         : "not yet measured";
 
   return (
@@ -186,12 +112,14 @@ export function Gauge({
           );
         })}
 
-        {fraction > 0.001 && (
-          <>
-            <path d={arcPath(START, angle, R_ARC)} className="np-gauge__sweep" />
-            <circle cx={capX} cy={capY} r="4.5" className="np-gauge__cap" />
-          </>
-        )}
+        <path
+          d={arcPath(START, START + SWEEP, R_ARC)}
+          pathLength="1"
+          strokeDasharray="1"
+          strokeDashoffset={1 - fraction}
+          className="np-gauge__sweep"
+        />
+        <circle cx={capX} cy={capY} r="4.5" className="np-gauge__cap" opacity={fraction > 0.001 ? 1 : 0} />
 
         <line
           x1={CX + R_ARC - 24}
@@ -201,7 +129,6 @@ export function Gauge({
           transform={`rotate(${angle} ${CX} ${CY})`}
           className="np-gauge__needle"
         />
-        <circle cx={CX} cy={CY} r="3" className="np-gauge__hub" />
 
         {SCALE_LABELS.map(({ fraction: labelFraction, label: scaleLabel }) => {
           const [labelX, labelY] = polar(START + labelFraction * SWEEP, R_RING - 17);

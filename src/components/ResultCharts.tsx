@@ -66,6 +66,7 @@ export function ThroughputChart({ result, dir }: { result: TestResult; dir: "dow
 }
 
 export function LiveMeasurementCharts({ samples }: { samples: Sample[] }) {
+  const reducedMotion = useReducedMotion();
   const throughput = samples
     .filter((sample) => sample.mbps !== undefined)
     .map((sample) => ({
@@ -104,7 +105,16 @@ export function LiveMeasurementCharts({ samples }: { samples: Sample[] }) {
               <XAxis dataKey="t" tickLine={false} axisLine={false} unit="s" fontSize={11} />
               <YAxis tickLine={false} axisLine={false} fontSize={11} width={44} />
               <ChartTooltip content={<ChartTooltipContent labelFormatter={(value) => `${value}s into test`} />} />
-              <Area dataKey="mbps" type="monotone" stroke="var(--color-mbps)" strokeWidth={2.4} fill="url(#live-throughput)" isAnimationActive={false} />
+              <Area
+                dataKey="mbps"
+                type="monotone"
+                stroke="var(--color-mbps)"
+                strokeWidth={2.4}
+                fill="url(#live-throughput)"
+                isAnimationActive={!reducedMotion}
+                animationDuration={220}
+                animationEasing="linear"
+              />
             </AreaChart>
           </ChartContainer>
         ) : <p className="flex h-48 items-center justify-center text-sm text-muted-foreground">Waiting for another throughput observation.</p>}
@@ -120,7 +130,16 @@ export function LiveMeasurementCharts({ samples }: { samples: Sample[] }) {
               <XAxis dataKey="t" tickLine={false} axisLine={false} unit="s" fontSize={11} />
               <YAxis tickLine={false} axisLine={false} unit="ms" fontSize={11} width={52} />
               <ChartTooltip content={<ChartTooltipContent labelFormatter={(value) => `${value}s into test`} />} />
-              <Line dataKey="rtt" type="monotone" stroke="var(--color-rtt)" strokeWidth={2.4} dot={false} isAnimationActive={false} />
+              <Line
+                dataKey="rtt"
+                type="monotone"
+                stroke="var(--color-rtt)"
+                strokeWidth={2.4}
+                dot={false}
+                isAnimationActive={!reducedMotion}
+                animationDuration={220}
+                animationEasing="linear"
+              />
             </LineChart>
           </ChartContainer>
         ) : <p className="flex h-48 items-center justify-center text-sm text-muted-foreground">Waiting for another latency sample.</p>}

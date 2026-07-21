@@ -30,3 +30,22 @@ export function speedToDialFraction(mbps: number): number {
   const progress = range > 0 ? (bounded - segment.minMbps) / range : 0;
   return segment.start + progress * (segment.end - segment.start);
 }
+
+/**
+ * Advance a displayed speed toward a real measured target without overshoot.
+ * The exponential response is frame-rate independent, so 60 Hz and 144 Hz
+ * displays follow the same curve while still rendering on every available
+ * animation frame.
+ */
+export function interpolateSpeed(currentMbps: number, targetMbps: number, deltaSeconds: number): number {
+  const current = Number.isFinite(currentMbps) ? Math.max(0, currentMbps) : 0;
+  const target = Number.isFinite(targetMbps) ? Math.max(0, targetMbps) : 0;
+  const delta = Number.isFinite(deltaSeconds) ? Math.min(Math.max(deltaSeconds, 0), 1 / 30) : 0;
+  const timeConstant = target >= current ? 0.2 : 0.32;
+  const blend = 1 - Math.exp(-delta / timeConstant);
+  const next = current + (target - current) * blend;
+  const settleThreshold = Math.max(0.01, target * 0.00025);
+
+  if (Math.abs(target - next) <= settleThreshold) return target;
+  return target >= current ? Math.min(next, target) : Math.max(next, target);
+}

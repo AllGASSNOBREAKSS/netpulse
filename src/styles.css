@@ -36,13 +36,11 @@ html, body {
 .np-gauge__sweep { fill: none; stroke: var(--speed-color); stroke-width: 10; stroke-linecap: butt; }
 .np-gauge__cap { fill: var(--speed-color); }
 .np-gauge__needle { stroke: var(--speed-color); stroke-width: 2.4; stroke-linecap: round; }
-.np-gauge__hub { fill: var(--speed-color); }
 
 /* Tick activation is driven by the same fraction as the needle. */
 .np-gauge__tick,
 .np-gauge__tick--major {
   stroke: color-mix(in oklab, var(--foreground) 22%, transparent);
-  transition: stroke 180ms ease;
 }
 .np-gauge__tick { stroke-width: 1.3; }
 .np-gauge__tick--major { stroke-width: 2; stroke: color-mix(in oklab, var(--foreground) 42%, transparent); }
@@ -60,7 +58,6 @@ html, body {
   letter-spacing: -0.035em;
   color: var(--speed-color);
   font-variant-numeric: tabular-nums;
-  transition: color 240ms ease;
 }
 .np-gauge__value[data-idle] { color: var(--np-muted); }
 .np-gauge__unit { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.3em; color: var(--np-muted); }

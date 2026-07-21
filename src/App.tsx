@@ -12,6 +12,7 @@ import { MetricDetail, ScoreDetail } from "@/components/MetricDetail";
 import { MethodologyModal, PreflightServer } from "@/components/Report";
 import { FixMyInternet } from "@/components/FixMyInternet";
 import { loadHistory, saveHistory, type HistoryEntry } from "@/lib/history";
+import { useGaugeMotion } from "@/hooks/use-gauge-motion";
 
 // Chart-heavy pages load on demand so recharts stays out of the main bundle.
 const ResultsPage = lazy(() => import("@/pages/Results").then((m) => ({ default: m.ResultsPage })));
@@ -138,6 +139,10 @@ export default function App() {
   const openDef = openMetric ? METRICS.find((m) => m.id === openMetric) : null;
   const isDownloadPhase = phase === "download_single" || phase === "download_multi";
   const isUploadPhase = phase === "upload";
+  const gaugeValues = useGaugeMotion({
+    download: phase === "done" && result ? result.downloadMbps : liveDown ?? 0,
+    upload: phase === "done" && result ? result.uploadMbps : liveUp ?? 0,
+  });
 
   /* ---- Speed Test page ---- */
   const fmtMbps = (n: number) => (n >= 100 ? String(Math.round(n)) : n.toFixed(1));
@@ -156,22 +161,22 @@ export default function App() {
       />
 
       {/* The measurement stage: one surface, twin gauges, one primary action. */}
-      <section className="rounded-2xl border border-border bg-card px-4 py-8 sm:px-10 sm:py-10">
+      <section className="px-0 py-4 sm:py-6">
         <div className="mx-auto grid max-w-4xl grid-cols-1 gap-10 sm:grid-cols-2 sm:gap-8">
           <Gauge
             label="Download"
-            liveMbps={liveDown}
+            valueMbps={gaugeValues.download}
             active={isDownloadPhase}
-            waiting={running && !isDownloadPhase && !isUploadPhase}
             done={phase === "done"}
+            hasMeasured={liveDown !== null || (phase === "done" && result !== null)}
             finalMbps={result?.downloadMbps ?? null}
           />
           <Gauge
             label="Upload"
-            liveMbps={liveUp}
+            valueMbps={gaugeValues.upload}
             active={isUploadPhase}
-            waiting={running && !isUploadPhase}
             done={phase === "done"}
+            hasMeasured={liveUp !== null || (phase === "done" && result !== null)}
             finalMbps={result?.uploadMbps ?? null}
           />
         </div>
