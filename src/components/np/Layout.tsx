@@ -70,9 +70,9 @@ export function Section({
   id?: string;
 }) {
   return (
-    <section id={id} className={cn("space-y-4", className)}>
+    <section id={id} className={cn("min-w-0 space-y-4", className)}>
       {(title || actions) && (
-        <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
+        <div className="min-w-0 flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
           <div className="min-w-0 space-y-1">
             {title && <h2 className="text-[17px] font-semibold tracking-tight">{title}</h2>}
             {description && (
