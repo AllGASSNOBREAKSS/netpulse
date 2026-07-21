@@ -1,10 +1,9 @@
 /**
  * Single owner for NetPulse's color mode.
  *
- * Two consumers must never disagree about light/dark:
- *   - the `.dark` class on <html>, which drives the Tailwind/shadcn tokens in
- *     index.css and the legacy surfaces in styles.css
- *   - Astryx's <Theme mode>, which drives every Astryx component
+ * Consumers must never disagree about light/dark. The `.dark` class on
+ * <html> drives the Tailwind/shadcn tokens in index.css, legacy surfaces in
+ * styles.css, and the isolated Astryx foundation-check route.
  *
  * So both read from this store. The class is the source of truth because
  * index.html applies it before first paint (no flash); this module keeps

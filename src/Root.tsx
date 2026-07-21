@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import App from "./App";
 import { AboutPage } from "./pages/About";
+import { AstryxProvider } from "./theme/AstryxProvider";
 
 // Migration-only surface; lazy so it never lands in the main bundle.
 const FoundationCheck = lazy(() =>
@@ -19,9 +20,11 @@ export function Root() {
 
   if (hash.startsWith("#/foundation")) {
     return (
-      <Suspense fallback={null}>
-        <FoundationCheck />
-      </Suspense>
+      <AstryxProvider>
+        <Suspense fallback={null}>
+          <FoundationCheck />
+        </Suspense>
+      </AstryxProvider>
     );
   }
 
