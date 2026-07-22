@@ -83,7 +83,7 @@ export const METRICS: MetricDef[] = [
     sub: (r) =>
       r.upload ? `median ${fmt(r.upload.medianMbps)} · peak obs. ${fmt(r.upload.peakMbps)} · variation ${r.upload.variationPct.toFixed(1)}%` : null,
     what: "How much data your connection can push out per second.",
-    how: "A discarded generated-payload warm-up primes the route and chooses an adaptive POST size. Up to three parallel HTTPS POST streams (one in low-data mode) then send non-personal, non-compressible bytes from memory. Reliable throughput is server-accepted payload divided by actual phase time. Fetch exposes neither byte-level upload progress nor wire overhead, so median, peak observation, and variation use cumulative accepted-payload observations and are labeled accordingly.",
+    how: "A discarded generated-payload warm-up primes the route and chooses an adaptive POST size and bounded stream count. HTTPS POST streams then send non-personal, non-compressible bytes from memory. Throughput is successfully submitted payload divided by actual phase time. Fetch exposes neither byte-level upload progress, a server-side byte receipt, nor wire overhead, so median, peak observation, and variation use cumulative successful-response observations and are labeled accordingly.",
     why: "Video calls, livestreaming, cloud backups and sending files all depend on upload. Many cable plans are heavily asymmetric — a fraction of the download figure.",
     bands: [
       { range: "≥ 50 Mbps", label: "Excellent — streaming and backups without thinking" },
@@ -97,7 +97,7 @@ export const METRICS: MetricDef[] = [
         : "Healthy. If calls still stutter while uploading, look at Upload-loaded latency instead.",
     samples: (r) => {
       const values = r.upload.samples;
-      return values.length ? { values, unit: "Mbps", caption: "Cumulative accepted-payload observations; Fetch does not expose byte-level upload windows" } : null;
+      return values.length ? { values, unit: "Mbps", caption: "Cumulative successfully submitted payload observations; Fetch exposes neither byte-level upload windows nor a server-received byte receipt" } : null;
     },
   },
   {
@@ -306,7 +306,7 @@ export const METRICS: MetricDef[] = [
     provenance: "measured",
     value: (r) => (r.dataUsedMB !== undefined ? `${r.dataUsedMB.toFixed(0)} MB` : null),
     what: "The application payload NetPulse observed during this test.",
-    how: "Counted byte-by-byte from download stream readers and from upload bodies after the server accepted each request. Browser APIs do not expose protocol overhead or the portion of an upload aborted mid-request, so this is measured payload, not exact on-wire usage.",
+    how: "Counted byte-by-byte from download stream readers and from upload bodies after each successful HTTP response. Unless an endpoint returns a verified received-byte receipt, upload is successfully submitted payload. Browser APIs do not expose protocol overhead or the portion of an upload aborted mid-request, so this is measured application payload, not exact on-wire usage.",
     why: "Speed tests are data-hungry. On metered or capped connections this matters — that's why low-data mode exists.",
     bands: [
       { range: "100–350 MB", label: "Typical full test (scales with your speed)" },

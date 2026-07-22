@@ -7,6 +7,9 @@ import { AstryxProvider } from "./theme/AstryxProvider";
 const FoundationCheck = lazy(() =>
   import("./pages/FoundationCheck").then((m) => ({ default: m.FoundationCheck })),
 );
+const ValidationDashboard = lazy(() =>
+  import("./pages/ValidationDashboard").then((m) => ({ default: m.ValidationDashboard })),
+);
 
 /**
  * Static-host friendly routing: the main app is state-routed; /#/about renders
@@ -17,6 +20,14 @@ export function Root() {
   const hash = window.location.hash;
 
   if (hash.startsWith("#/about")) return <AboutPage />;
+
+  if (import.meta.env.DEV && hash.startsWith("#/internal/validation")) {
+    return (
+      <Suspense fallback={null}>
+        <ValidationDashboard />
+      </Suspense>
+    );
+  }
 
   if (hash.startsWith("#/foundation")) {
     return (

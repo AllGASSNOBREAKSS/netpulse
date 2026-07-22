@@ -68,10 +68,10 @@ state that only one provider is currently configured.
 
 1. Replaced the live data-use estimate derived from Mbps with cumulative counted
    application bytes from the engine.
-2. Replaced upper-half sample selection with total transferred/accepted payload
+2. Replaced upper-half sample selection with total transferred/submitted payload
    divided by actual phase duration, avoiding upward selection bias.
-3. Upload progress now updates from cumulative server-accepted payload; any
-   median, peak, or variation is explicitly labeled as an accepted-payload
+3. Upload progress now updates from cumulative successfully submitted payload
+   after each successful HTTP response; any median, peak, or variation is explicitly labeled as a submitted-payload
    observation rather than byte-level upload telemetry.
 4. Load requests start before loaded-latency probes, preventing an idle probe
    from entering the loaded sample set.

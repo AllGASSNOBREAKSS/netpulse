@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "speedTiers": [
+    { "id": "1m", "downloadMbps": 1, "uploadMbps": 1, "smoke": false },
+    { "id": "5m", "downloadMbps": 5, "uploadMbps": 2, "smoke": false },
+    { "id": "10m", "downloadMbps": 10, "uploadMbps": 5, "smoke": true },
+    { "id": "25m", "downloadMbps": 25, "uploadMbps": 10, "smoke": false },
+    { "id": "50m", "downloadMbps": 50, "uploadMbps": 20, "smoke": false },
+    { "id": "100m", "downloadMbps": 100, "uploadMbps": 40, "smoke": true },
+    { "id": "500m", "downloadMbps": 500, "uploadMbps": 100, "smoke": false },
+    { "id": "1g", "downloadMbps": 1000, "uploadMbps": 200, "smoke": true },
+    { "id": "2.5g", "downloadMbps": 2500, "uploadMbps": 500, "requiresHardwareCertification": true, "smoke": false },
+    { "id": "5g", "downloadMbps": 5000, "uploadMbps": 1000, "requiresHardwareCertification": true, "smoke": false }
+  ],
+  "latencyMs": [5, 20, 50, 100, 200, 300],
+  "impairments": [
+    { "id": "clean", "jitterMs": 0, "packetLossPct": 0, "queuePackets": 100, "saturation": "none", "fault": "none" },
+    { "id": "jitter-10", "jitterMs": 10, "packetLossPct": 0, "queuePackets": 100, "saturation": "none", "fault": "none" },
+    { "id": "loss-1", "jitterMs": 0, "packetLossPct": 1, "queuePackets": 100, "saturation": "none", "fault": "none" },
+    { "id": "deep-queue", "jitterMs": 0, "packetLossPct": 0, "queuePackets": 5000, "saturation": "none", "fault": "none" },
+    { "id": "endpoint-failure", "jitterMs": 0, "packetLossPct": 0, "queuePackets": 100, "saturation": "none", "fault": "endpoint-failure" },
+    { "id": "intermittent-outage", "jitterMs": 0, "packetLossPct": 0, "queuePackets": 100, "saturation": "none", "fault": "intermittent-outage" },
+    { "id": "path-quality-change", "jitterMs": 0, "packetLossPct": 0, "queuePackets": 100, "saturation": "none", "fault": "route-change" }
+  ]
+}

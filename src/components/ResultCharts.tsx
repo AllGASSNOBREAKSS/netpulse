@@ -91,7 +91,7 @@ export function LiveMeasurementCharts({ samples }: { samples: Sample[] }) {
     <section className="grid gap-4 rounded-2xl border border-border bg-card p-5 lg:grid-cols-2" aria-label="Live measurement telemetry">
       <div className="min-w-0">
         <h2 className="font-display text-base font-semibold">Live throughput</h2>
-        <p className="mb-3 text-xs text-muted-foreground">{throughput.length} real timed windows or accepted-payload observations</p>
+        <p className="mb-3 text-xs text-muted-foreground">{throughput.length} real timed windows or successfully submitted payload observations</p>
         {throughput.length > 1 ? (
           <ChartContainer config={throughputConfig} className="h-48 w-full">
             <AreaChart data={throughput} margin={{ left: 4, right: 12, top: 8 }}>

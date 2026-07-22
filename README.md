@@ -55,7 +55,7 @@ A staged pipeline — full detail in **[ENGINE.md](ENGINE.md)**:
 | Server selection | Probes candidates, ranks by median latency + jitter + availability, explains the pick |
 | Idle latency | Timed zero-byte probes (`performance.now()`) → min / median / mean / **P95 / P99** / jitter |
 | Download | **Single- then multi-connection**, cache-busted, no-store; received payload ÷ actual phase time, with timed windows for variation |
-| Upload | Parallel POST of non-compressible in-memory payloads; server-accepted payload ÷ actual phase time |
+| Upload | Parallel POST of non-compressible in-memory payloads; successfully submitted payload ÷ actual phase time; no byte-level progress or server receipt is available from Fetch |
 | Loaded latency | Probed *while saturating* download, then upload — kept **separate** |
 | Bufferbloat | Loaded − idle rise, **separate download/upload grades A–F** |
 | Stability | 0–100 from latency stddev + spikes + throughput variation; P95/P99; longest spike |
@@ -75,8 +75,8 @@ inspectable and exportable as JSON.
 
 - 📡 Real measurement engine — every card is visibly labeled **measured**,
   **calculated**, or **experimental**; unsupported metrics are never invented
-- 🏎️ Animated automotive speedometer — spring-physics needle, auto-scaling dial
-  (240 → 500 → 1000+ Mbps), redline zone, phase "gear" indicator showing the
+- 🏎️ Animated automotive speedometer — synchronized needle and number, fixed
+  four-band dial, redline zone, phase "gear" indicator showing the
   stream count that actually ran, measured-payload fuel bar
 - 🔍 Interactive metric cards — click any of the 11 metrics for what it means,
   how it was measured, your result, healthy ranges, raw samples, and a
@@ -140,7 +140,14 @@ inspectable and exportable as JSON.
   device; treat them as a consistent relative baseline, not an absolute truth.
 
 **Docs:** [ENGINE.md](ENGINE.md) (measurement pipeline) ·
+[ARCHITECTURE.md](ARCHITECTURE.md) (runtime boundaries and data flow) ·
+[ACCURACY.md](ACCURACY.md) (trust model and current evidence boundary) ·
 [VALIDATION.md](VALIDATION.md) (test matrix) ·
+[METHODOLOGY.md](METHODOLOGY.md) (formulas, ordering, limitations, privacy, and validation tolerances) ·
+[lab/README.md](lab/README.md) (controlled accuracy/performance laboratory) ·
+[VALIDATION_REPORT.md](VALIDATION_REPORT.md) (current evidence and launch recommendation) ·
+[GLOBAL_ENDPOINTS.md](GLOBAL_ENDPOINTS.md) (active endpoint facts and activation gates) ·
+[GLOBAL_NETWORK.md](GLOBAL_NETWORK.md) (regional data-plane contract, rollout, selection, privacy, scaling, and validation gate) ·
 [AUDIT.md](AUDIT.md) (codebase honesty audit) ·
 [SECURITY_AUDIT.md](SECURITY_AUDIT.md) (threat model and release gates) ·
 [DIAGNOSTICS.md](DIAGNOSTICS.md) (troubleshooting rules) ·

@@ -49,6 +49,7 @@ export function PreflightServer({
           <div className="pf__h">Server {server.manual && <span className="pf__manual">manual</span>}</div>
           <div className="pf__chips">
             <Chip k="Provider" v={server.chosen.provider} />
+            <Chip k="Region" v={server.chosen.regionLabel} />
             {server.chosen.edgeCode && <Chip k="Edge code" v={server.chosen.edgeCode} />}
             {server.chosen.clientCountryCode && <Chip k="Client country" v={server.chosen.clientCountryCode} />}
             <Chip k="Protocol" v={server.chosen.protocol} />
@@ -56,8 +57,17 @@ export function PreflightServer({
             <Chip k="Latency" v={`${Math.round(server.chosen.latency.median)} ms`} />
             <Chip k="Server city" v={server.chosen.city ?? "unavailable"} />
             <Chip k="Distance" v={server.chosen.approximateDistanceKm === null ? "unavailable" : `${server.chosen.approximateDistanceKm} km`} />
+            <Chip k="Health" v={server.chosen.healthStatus} warn={server.chosen.healthStatus !== "healthy"} title={server.chosen.healthReason} />
+            <Chip k="Load" v={server.chosen.loadPct === null ? "unavailable" : `${Math.round(server.chosen.loadPct)}%`} />
+            <Chip k="Capacity" v={server.chosen.availableCapacityMbps === null ? "unavailable" : `${Math.round(server.chosen.availableCapacityMbps)} Mbps free`} />
+            <Chip k="Version" v={server.chosen.serverVersion ?? "unavailable"} />
           </div>
           <div className="pf__reason">{server.reason}</div>
+          <div className="pf__est">
+            {server.degraded ? "Degraded selection: " : "Backups ready: "}
+            {server.backups.length > 0 ? server.backups.map((backup) => `${backup.regionLabel} (${backup.provider})`).join(", ") : "no independently reachable backup endpoint"}.
+            {" "}{server.coverage.filter((region) => region.status === "supported" || region.status === "pilot").length} requested region(s) currently supported or in pilot; {server.coverage.filter((region) => region.status === "planned" || region.status === "unsupported").length} remain unavailable.
+          </div>
         </div>
       )}
     </section>
@@ -133,15 +143,23 @@ export function MethodologyModal({
         <h3 className="mi__h">Test configuration</h3>
         <table className="mi__bands">
           <tbody>
+            <tr><td className="mi__range">Run</td><td>{result.runId} · schema {result.schemaVersion} · engine {result.engineVersion} · method {result.methodologyVersion}</td></tr>
+            <tr><td className="mi__range">Endpoint directory</td><td>{result.server.directoryRevision} · {result.server.directorySource}{result.server.directoryWarning ? ` · ${result.server.directoryWarning}` : ""}</td></tr>
+            <tr><td className="mi__range">Operational telemetry</td><td>health {result.server.chosen.healthStatus} · load {result.server.chosen.loadPct === null ? "unavailable" : `${Math.round(result.server.chosen.loadPct)}%`} · capacity headroom {result.server.chosen.availableCapacityMbps === null ? "unavailable" : `${Math.round(result.server.chosen.availableCapacityMbps)} Mbps`} · version {result.server.chosen.serverVersion ?? "unavailable"}</td></tr>
+            <tr><td className="mi__range">Failover candidates</td><td>{result.server.backups.length ? result.server.backups.map((backup) => `${backup.regionLabel} (${backup.provider})`).join(", ") : "none reachable"}</td></tr>
             <tr><td className="mi__range">Server</td><td>{result.server.chosen.provider} · edge {result.server.chosen.edgeCode ?? "unknown"} · {result.server.chosen.protocol}</td></tr>
             <tr><td className="mi__range">Mode</td><td>{result.lowData ? "Low-data" : "Full"}</td></tr>
             <tr><td className="mi__range">IP family</td><td>{result.ispLocation.ipFamily} · {result.ispLocation.ipMasked}</td></tr>
+            <tr><td className="mi__range">IPv4 / IPv6 comparison</td><td>{result.preflight.ipComparison.reason}</td></tr>
+            <tr><td className="mi__range">Transport telemetry</td><td>browser {result.transportTelemetry.browserProtocol ?? "unavailable"} · server {result.transportTelemetry.serverTransport} · TCP RTT {result.transportTelemetry.serverReportedTcpRttMs ?? "unavailable"} · QUIC RTT {result.transportTelemetry.serverReportedQuicRttMs ?? "unavailable"} · retransmits {result.transportTelemetry.serverReportedRetransmits ?? "unavailable"}</td></tr>
+            <tr><td className="mi__range">Secondary verification</td><td>{result.accuracyPassport.secondaryVerification.reason}</td></tr>
+            <tr><td className="mi__range">Echo / packet loss</td><td>{result.packetLoss.note}</td></tr>
             <tr><td className="mi__range">Payload transferred</td><td>{result.dataUsedMB.toFixed(1)} MB including discarded warm-ups, in {(result.durationMs / 1000).toFixed(1)} s</td></tr>
-            <tr><td className="mi__range">Download phase</td><td>{(result.download.multi.durationMs / 1000).toFixed(2)} s · {formatBytes(result.download.multi.bytes + result.download.multi.warmupBytes)} payload · {result.download.multi.samples.length} timed windows · {result.download.multi.variationPct.toFixed(1)}% variation · stop: {result.download.multi.stopReason}</td></tr>
+            <tr><td className="mi__range">Download phase</td><td>{(result.download.multi.durationMs / 1000).toFixed(2)} s · {formatBytes(result.download.multi.bytes + result.download.multi.warmupBytes)} payload · {result.download.multi.samples.length} timed windows · P5 {result.download.multi.p5Mbps.toFixed(1)} / P95 {result.download.multi.p95Mbps.toFixed(1)} Mbps · {result.download.multi.streams} stream(s) · {result.download.multi.variationPct.toFixed(1)}% variation · stop: {result.download.multi.stopReason}</td></tr>
             <tr><td className="mi__range">Download requests</td><td>{formatBytes(result.download.multi.requestBytes)} adaptive payload · warm-up {result.download.multi.warmupSucceeded ? "completed" : "failed"}</td></tr>
-            <tr><td className="mi__range">Upload phase</td><td>{(result.upload.durationMs / 1000).toFixed(2)} s · {formatBytes(result.upload.bytes + result.upload.warmupBytes)} payload · {result.upload.samples.length} accepted observations · {result.upload.variationPct.toFixed(1)}% observed variation · stop: {result.upload.stopReason}</td></tr>
+            <tr><td className="mi__range">Upload phase</td><td>{(result.upload.durationMs / 1000).toFixed(2)} s · {formatBytes(result.upload.bytes + result.upload.warmupBytes)} payload · {result.upload.samples.length} successful observations · P5 {result.upload.p5Mbps.toFixed(1)} / P95 {result.upload.p95Mbps.toFixed(1)} Mbps · {result.upload.streams} stream(s) · {result.upload.variationPct.toFixed(1)}% observed variation · stop: {result.upload.stopReason}</td></tr>
             <tr><td className="mi__range">Upload requests</td><td>{formatBytes(result.upload.requestBytes)} adaptive payload · warm-up {result.upload.warmupSucceeded ? "completed" : "failed"}</td></tr>
-            <tr><td className="mi__range">Raw samples</td><td>{result.samples.length} events stored</td></tr>
+            <tr><td className="mi__range">Raw evidence</td><td>{result.samples.length} measurement samples · {result.rawEvidence.events.length} typed events · {result.rawEvidence.phases.length} phase attempts · retained locally for the latest 20 completed runs</td></tr>
           </tbody>
         </table>
       </section>
@@ -152,13 +170,28 @@ export function MethodologyModal({
           <tbody>
             {result.server.candidates.map((c) => (
               <tr key={c.id}>
-                <td className="mi__range">{c.provider}</td>
+                <td className="mi__range">{c.regionLabel} · {c.provider}</td>
                 <td>
                   {c.available
-                    ? `${Math.round(c.latency.median)} ms median · ${c.attempted - c.failed}/${c.attempted} probes · rank ${c.rank}`
+                    ? `${Math.round(c.latency.median)} ms median · ${Math.round(c.latency.jitter)} ms jitter · ${c.attempted - c.failed}/${c.attempted} probes · health ${c.healthStatus} · load ${c.loadPct === null ? "unavailable" : `${Math.round(c.loadPct)}%`} · rank ${c.rank}`
                     : `unreachable · 0/${c.attempted} probes`}
                   {c.id === result.server.chosen.id ? " · chosen" : ""}
                 </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+
+      <section className="mi">
+        <h3 className="mi__h">Regional coverage</h3>
+        <p className="mi__caption">Planned does not mean deployed. A region becomes selectable only after a real endpoint passes protocol, health, capacity, IPv4/IPv6, and independent route validation.</p>
+        <table className="mi__bands">
+          <tbody>
+            {result.server.coverage.map((region) => (
+              <tr key={region.id}>
+                <td className="mi__range">{region.label}</td>
+                <td>{region.status} · {region.note}</td>
               </tr>
             ))}
           </tbody>

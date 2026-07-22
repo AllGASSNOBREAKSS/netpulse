@@ -1,4 +1,5 @@
 export type HistoryEntry = {
+  runId?: string;
   ts: number;
   down: number;
   up: number;
@@ -53,6 +54,7 @@ function isHistoryEntry(value: unknown): value is HistoryEntry {
     typeof entry.score === "number" &&
     typeof entry.dataMB === "number" &&
     optionalString(entry.isp) &&
+    optionalString(entry.runId) &&
     optionalString(entry.server) &&
     optionalNumber(entry.confidence) &&
     optionalNumber(entry.loadedDownMs) &&

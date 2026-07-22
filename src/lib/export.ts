@@ -10,9 +10,9 @@ import type { TestResult } from "./types";
 import type { Verdict } from "./verdict";
 
 export const METHODOLOGY = [
-  "NetPulse measures against the Cloudflare speed endpoint (speed.cloudflare.com), an anycast service that routes you to the nearest of Cloudflare's edge locations. Results reflect the path to that edge and will differ from Ookla, Fast.com, Cloudflare's own test, or M-Lab, which use different servers, server counts, and aggregation methods. We do not tune NetPulse to match any of them.",
+  "NetPulse measures against the endpoint selected from its validated directory. The checked-in public fallback is Cloudflare anycast; future NetPulse-operated regions remain unsupported until deployed and independently validated. Results reflect the chosen route and can differ from Ookla, Fast.com, Cloudflare, or M-Lab because servers, stream counts, duration, and aggregation differ. We do not tune NetPulse to match them.",
   "Latency is measured with zero-byte HTTPS requests timed by performance.now() (monotonic, sub-millisecond). HTTP round-trips read slightly higher than raw ICMP ping.",
-  "Throughput uses discarded connection warm-ups, adaptive request payloads, and cache-busted no-store requests. Download runs single-connection then multi-connection. The aggregate result is measured application payload divided by actual phase time; download windows provide median, P90 capacity context, peak observation, and variation. Upload uses cumulative accepted-payload observations because Fetch exposes no byte-level upload progress.",
+  "Throughput uses discarded connection warm-ups, adaptive request payloads, adaptive concurrency, and cache-busted no-store requests. Download runs single-connection then multi-connection. The aggregate result is measured application payload divided by actual phase time; measured windows provide P5, median, P95, peak, and variation context. Upload uses cumulative successfully submitted payload observations because Fetch exposes no byte-level upload progress or server-received byte receipt.",
   "Download and upload run sequentially so loaded latency stays attributable to one direction. A simultaneous full-duplex stress test answers a different question and would not make NetPulse identical to services using different endpoints or aggregation methods.",
   "Loaded latency is probed continuously during download and upload; bufferbloat is the increase over idle, graded separately per direction.",
   "Packet loss is unavailable: the experimental WebRTC/STUN card reports UDP reachability, not an end-to-end loss percentage.",
@@ -23,6 +23,9 @@ export function buildExport(result: TestResult, verdict: Verdict | null) {
   return {
     tool: "NetPulse",
     schemaVersion: result.schemaVersion,
+    runId: result.runId,
+    engineVersion: result.engineVersion,
+    methodologyVersion: result.methodologyVersion,
     generatedAt: new Date(result.timestamp).toISOString(),
     methodology: METHODOLOGY,
     scoringFormula: {
@@ -54,7 +57,9 @@ export function buildExport(result: TestResult, verdict: Verdict | null) {
     dataTransferredMB: Math.round(result.dataUsedMB),
     durationMs: Math.round(result.durationMs),
     limitations: result.limitations,
+    accuracyPassport: result.accuracyPassport,
     rawSamples: result.samples,
+    rawEvidence: result.rawEvidence,
   };
 }
 
@@ -96,10 +101,14 @@ export function resultCsvRows(result: TestResult, verdict: Verdict | null): Reco
   return [
     {
       timestamp: new Date(result.timestamp).toISOString(),
+      run_id: result.runId,
+      engine_version: result.engineVersion,
       health_score: verdict?.score ?? "",
       confidence: result.confidence.score,
       download_mbps: result.downloadMbps.toFixed(1),
       download_p90_window_mbps: percentile(result.download.multi.samples, 90).toFixed(1),
+      download_p5_window_mbps: result.download.multi.p5Mbps.toFixed(1),
+      download_p95_window_mbps: result.download.multi.p95Mbps.toFixed(1),
       download_median_window_mbps: result.download.multi.medianMbps.toFixed(1),
       download_peak_window_mbps: result.download.multi.peakMbps.toFixed(1),
       download_variation_pct: result.download.multi.variationPct.toFixed(1),
@@ -107,6 +116,8 @@ export function resultCsvRows(result: TestResult, verdict: Verdict | null): Reco
       upload_median_observation_mbps: result.upload.medianMbps.toFixed(1),
       upload_peak_observation_mbps: result.upload.peakMbps.toFixed(1),
       upload_variation_pct: result.upload.variationPct.toFixed(1),
+      download_streams: result.download.multi.streams,
+      upload_streams: result.upload.streams,
       idle_latency_ms: Math.round(result.idlePingMs),
       loaded_down_ms: Math.round(result.loadedDownPingMs),
       loaded_up_ms: Math.round(result.loadedUpPingMs),
@@ -144,8 +155,8 @@ export function buildShareReport(result: TestResult, verdict: Verdict | null): s
     `**Result confidence:** ${r.confidence.score}% (${r.confidence.summary})`,
     ``,
     `## Metrics`,
-    `- Download: **${L(r.downloadMbps, 1)} Mbps** aggregate (P90 window ${L(percentile(r.download.multi.samples, 90), 1)}; single ${L(r.download.single.mbps, 1)})`,
-    `- Upload: **${L(r.uploadMbps, 1)} Mbps** accepted-payload aggregate (peak observation ${L(r.upload.peakMbps, 1)})`,
+    `- Download: **${L(r.downloadMbps, 1)} Mbps** aggregate (P5/P95 windows ${L(r.download.multi.p5Mbps, 1)}/${L(r.download.multi.p95Mbps, 1)}; single ${L(r.download.single.mbps, 1)})`,
+    `- Upload: **${L(r.uploadMbps, 1)} Mbps** successfully submitted payload (peak observation ${L(r.upload.peakMbps, 1)})`,
     `- Idle latency: **${L(r.idlePingMs)} ms**  (p95 ${L(r.idleLatency.p95)}, jitter ${L(r.idleJitterMs, 1)})`,
     `- Loaded latency: down ${L(r.loadedDownPingMs)} ms / up ${L(r.loadedUpPingMs)} ms`,
     `- Bufferbloat: **${r.bufferbloatGrade}** (+${L(r.bufferbloatMs)} ms; down ${r.bufferbloat.downloadGrade} / up ${r.bufferbloat.uploadGrade})`,

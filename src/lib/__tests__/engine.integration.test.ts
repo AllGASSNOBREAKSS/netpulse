@@ -56,5 +56,26 @@ describe("measurement pipeline integration", () => {
     expect(result.packetLoss.status).toBe("unavailable");
     expect(result.confidence.reasons.some((reason) => reason.label === "Upload duration")).toBe(true);
     expect(result.samples.every((sample) => sample.t >= 0)).toBe(true);
+    expect(result.schemaVersion).toBe(4);
+    expect(result.runId).toMatch(/^np-/);
+    expect(result.rawEvidence.events.length).toBeGreaterThan(result.samples.length);
+    expect(result.rawEvidence.phases.every((phase) => phase.status === "completed")).toBe(true);
+    expect(result.accuracyPassport.validSampleCount).toBe(result.samples.length);
+    expect(result.accuracyPassport.secondaryVerification.status).toBe("unavailable");
+    expect(result.preflight.ipComparison.ipv4.successful).toBeGreaterThan(0);
+    expect(result.transportTelemetry.serverTransport).toBe("unknown");
+    expect(result.download.multi.p5Mbps).toBeLessThanOrEqual(result.download.multi.p95Mbps);
+    expect(result.download.multi.streams).toBeGreaterThan(0);
+  });
+
+  it("cancels before network work when the caller signal is already aborted", async () => {
+    vi.stubGlobal("navigator", { userAgent: "test", hardwareConcurrency: 4 });
+    vi.stubGlobal("window", { isSecureContext: true, matchMedia: () => ({ matches: false }) });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(runTest({ lowData: true, signal: controller.signal }, {})).rejects.toMatchObject({
+      name: "MeasurementCancelledError",
+    });
   });
 });

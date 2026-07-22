@@ -43,6 +43,7 @@ import {
 } from "@/components/np/Layout";
 import { cn } from "@/lib/utils";
 import type { HistoryEntry } from "@/lib/history";
+import { compareIspHistory } from "@/lib/historicalIntelligence";
 
 export type { HistoryEntry } from "@/lib/history";
 
@@ -110,6 +111,7 @@ export function HistoryPage({
       worst: Math.min(...rows.map((h) => h.down)),
     };
   }, [rows]);
+  const ispComparisons = useMemo(() => compareIspHistory(rows), [rows]);
 
   const chartData = useMemo(
     () =>
@@ -314,6 +316,28 @@ export function HistoryPage({
                   { label: "Worst download", value: `${fmt(stats!.worst)} Mbps`, tone: "warn" },
                 ]}
               />
+
+              {ispComparisons.length > 0 && (
+                <Section title="Recorded ISP comparison" description="Local medians only. A provider appears after at least three completed tests that recorded the same ISP name; this is not a regional market ranking.">
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    {ispComparisons.map((comparison) => (
+                      <Panel key={comparison.isp} className="space-y-3 p-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <h3 className="font-medium">{comparison.isp}</h3>
+                          <StatusPill tone="neutral">{comparison.sampleCount} tests</StatusPill>
+                        </div>
+                        <KeyValueList items={[
+                          { k: "Median download", v: `${fmt(comparison.medianDownloadMbps)} Mbps` },
+                          { k: "Median upload", v: `${fmt(comparison.medianUploadMbps)} Mbps` },
+                          { k: "Median idle latency", v: `${comparison.medianLatencyMs.toFixed(1)} ms` },
+                          { k: "Median loaded latency", v: comparison.medianLoadedLatencyMs === null ? "unavailable" : `${comparison.medianLoadedLatencyMs.toFixed(1)} ms` },
+                          { k: "Median result confidence", v: comparison.medianConfidence === null ? "unavailable" : `${comparison.medianConfidence.toFixed(0)}%` },
+                        ]} />
+                      </Panel>
+                    ))}
+                  </div>
+                </Section>
+              )}
 
               {chartData.length >= 2 && (
                 <div className="grid gap-5 xl:grid-cols-2">

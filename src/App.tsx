@@ -1,6 +1,7 @@
-import { lazy, Suspense, useCallback, useRef, useState } from "react";
-import { ArrowRight, Play, Share2 } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { ArrowRight, Play, Share2, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { PageHeader, Section, StatGrid } from "@/components/np/Layout";
 import { AppHeader } from "@/components/AppHeader";
@@ -12,7 +13,11 @@ import { MetricDetail, ScoreDetail } from "@/components/MetricDetail";
 import { MethodologyModal, PreflightServer } from "@/components/Report";
 import { FixMyInternet } from "@/components/FixMyInternet";
 import { loadHistory, saveHistory, type HistoryEntry } from "@/lib/history";
+import { clearRawEvidence, deleteRawEvidence, saveRawEvidence } from "@/lib/evidenceStore";
 import { useGaugeMotion } from "@/hooks/use-gauge-motion";
+import { listServerOptions, type ServerOption } from "@/lib/servers";
+import { isCancellation } from "@/lib/cancellation";
+import type { MeasurementEvent } from "@/lib/measurementPipeline";
 
 // Chart-heavy pages load on demand so recharts stays out of the main bundle.
 const ResultsPage = lazy(() => import("@/pages/Results").then((m) => ({ default: m.ResultsPage })));
@@ -41,8 +46,28 @@ const PHASE_LABEL: Record<Phase, string> = {
   upload: "Measuring upload",
   packetloss: "Analysis — UDP reachability",
   done: "Test complete",
+  cancelled: "Test cancelled — incomplete measurements were discarded",
   error: "Test failed — check your connection and retry",
 };
+
+function samplesFromEvents(events: MeasurementEvent[]): Sample[] {
+  return events.flatMap((event) => {
+    const mbps = typeof event.data.mbps === "number" ? event.data.mbps : undefined;
+    const rttMs = typeof event.data.rttMs === "number" ? event.data.rttMs : undefined;
+    if (mbps === undefined && rttMs === undefined) return [];
+    const streamMode = event.data.streamMode === "single" || event.data.streamMode === "multi"
+      ? event.data.streamMode
+      : undefined;
+    const phase: Phase = event.phase === "measuring-idle-latency"
+      ? "latency"
+      : event.phase === "measuring-upload" || event.phase === "measuring-upload-loaded-latency"
+        ? "upload"
+        : streamMode === "single"
+          ? "download_single"
+          : "download_multi";
+    return [{ t: event.elapsedMs, phase, mbps, rttMs, streamMode }];
+  });
+}
 
 export default function App() {
   const [view, setView] = useState<View>("speed");
@@ -60,9 +85,34 @@ export default function App() {
   const [reportCopied, setReportCopied] = useState(false);
   const [preflight, setPreflight] = useState<Preflight | null>(null);
   const [server, setServer] = useState<ServerSelection | null>(null);
+  const [serverPreference, setServerPreference] = useState("auto");
+  const [serverOptions, setServerOptions] = useState<ServerOption[]>([]);
+  const [serverDirectoryError, setServerDirectoryError] = useState<string | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
   const runningRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
 
-  const running = phase !== "idle" && phase !== "done" && phase !== "error";
+  useEffect(() => {
+    let current = true;
+    void listServerOptions()
+      .then((options) => {
+        if (!current) return;
+        setServerOptions(options);
+        setServerDirectoryError(null);
+      })
+      .catch((error: unknown) => {
+        if (!current) return;
+        setServerOptions([]);
+        setServerDirectoryError(error instanceof Error ? error.message : "Endpoint directory unavailable.");
+      });
+    return () => {
+      current = false;
+    };
+  }, []);
+
+  useEffect(() => () => abortRef.current?.abort(), []);
+
+  const running = phase !== "idle" && phase !== "done" && phase !== "cancelled" && phase !== "error";
 
   const copyReport = useCallback(async () => {
     if (!result) return;
@@ -85,26 +135,43 @@ export default function App() {
     setLiveSamples([]);
     setPreflight(null);
     setServer(null);
+    setRunError(null);
     setView("speed");
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       const r = await runTest(
-        { lowData },
+        {
+          lowData,
+          serverId: serverPreference === "auto" ? undefined : serverPreference,
+          signal: controller.signal,
+        },
         {
           onPhase: setPhase,
           onPreflight: setPreflight,
           onServer: setServer,
-          onSample: (s) => {
-            setLiveSamples((samples) => [...samples.slice(-239), s]);
-            if (s.mbps === undefined) return;
-            if (s.phase === "upload") setLiveUp(s.mbps);
-            else setLiveDown(s.mbps);
+          onEvents: (events) => {
+            const batch = samplesFromEvents(events);
+            if (batch.length === 0) return;
+            setLiveSamples((samples) => [...samples, ...batch].slice(-240));
+            const latestDownload = [...batch].reverse().find((sample) => sample.mbps !== undefined && sample.phase !== "upload");
+            const latestUpload = [...batch].reverse().find((sample) => sample.mbps !== undefined && sample.phase === "upload");
+            if (latestDownload?.mbps !== undefined) setLiveDown(latestDownload.mbps);
+            if (latestUpload?.mbps !== undefined) setLiveUp(latestUpload.mbps);
           },
         },
       );
+      if (import.meta.env.DEV && import.meta.env.VITE_NETPULSE_LAB_MODE === "true") {
+        window.__NETPULSE_LAB_RESULT__ = r;
+      }
       setResult(r);
+      void saveRawEvidence(r).catch((error: unknown) => {
+        console.warn("NetPulse could not save raw measurement evidence locally.", error);
+      });
       const v = judge(r);
       setVerdict(v);
       const entry: HistoryEntry = {
+        runId: r.runId,
         ts: r.timestamp,
         down: r.downloadMbps,
         up: r.uploadMbps,
@@ -129,12 +196,23 @@ export default function App() {
         saveHistory(next);
         return next;
       });
-    } catch {
-      setPhase("error");
+    } catch (error) {
+      if (isCancellation(error)) {
+        setLiveDown(null);
+        setLiveUp(null);
+        setLiveSamples([]);
+        setPhase("cancelled");
+      } else {
+        setRunError(error instanceof Error ? error.message : "The measurement could not complete.");
+        setPhase("error");
+      }
     } finally {
+      if (abortRef.current === controller) abortRef.current = null;
       runningRef.current = false;
     }
-  }, [lowData]);
+  }, [lowData, serverPreference]);
+
+  const cancel = useCallback(() => abortRef.current?.abort(), []);
 
   const openDef = openMetric ? METRICS.find((m) => m.id === openMetric) : null;
   const isDownloadPhase = phase === "download_single" || phase === "download_multi";
@@ -201,6 +279,11 @@ export default function App() {
               <Play className="size-4" />
               {running ? "Testing…" : result ? "Run Again" : "Start Test"}
             </Button>
+            {running && (
+              <Button size="lg" variant="outline" onClick={cancel} className="h-11 gap-2 px-6 text-[14px]">
+                <Square className="size-3.5" aria-hidden="true" /> Cancel
+              </Button>
+            )}
             {result && (
               <Button
                 size="lg"
@@ -211,6 +294,30 @@ export default function App() {
                 <Share2 className="size-4" /> {reportCopied ? "Copied ✓" : "Share Result"}
               </Button>
             )}
+          </div>
+          {runError && (
+            <p className="max-w-md text-center text-[12.5px] text-destructive" role="alert">
+              {runError}
+            </p>
+          )}
+          <div className="flex max-w-sm flex-col items-center gap-2 text-center">
+            <label htmlFor="speed-server-preference" className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+              Advanced test region
+            </label>
+            <Select value={serverPreference} onValueChange={setServerPreference} disabled={running || serverOptions.length === 0}>
+              <SelectTrigger id="speed-server-preference" className="w-[min(22rem,82vw)]" aria-label="Choose a measurement server or automatic selection">
+                <SelectValue placeholder="Automatic selection" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">Automatic — health and route aware</SelectItem>
+                {serverOptions.map((option) => (
+                  <SelectItem key={option.id} value={option.id}>{option.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
+              {serverDirectoryError ?? "Only real endpoints advertised by the versioned directory are listed. Planned regions are not selectable."}
+            </p>
           </div>
         </div>
       </section>
@@ -247,7 +354,13 @@ export default function App() {
         </button>
       )}
 
-      {(preflight || server) && !result && <PreflightServer preflight={preflight} server={server} preOnly />}
+      {(preflight || server || result) && (
+        <PreflightServer
+          preflight={result?.preflight ?? preflight}
+          server={result?.server ?? server}
+          preOnly={!result}
+        />
+      )}
 
       {result && (
         <>
@@ -328,9 +441,18 @@ export default function App() {
               onClear={() => {
                 setHistory([]);
                 saveHistory([]);
+                void clearRawEvidence().catch((error: unknown) => {
+                  console.warn("NetPulse could not clear local raw evidence.", error);
+                });
               }}
               onDelete={(ts) => {
                 setHistory((prev) => {
+                  const runId = prev.find((entry) => entry.ts === ts)?.runId;
+                  if (runId) {
+                    void deleteRawEvidence(runId).catch((error: unknown) => {
+                      console.warn("NetPulse could not delete local raw evidence.", error);
+                    });
+                  }
                   const next = prev.filter((h) => h.ts !== ts);
                   saveHistory(next);
                   return next;

@@ -1,4 +1,4 @@
-# NetPulse measurement pipeline (v2)
+# NetPulse measurement pipeline (v3.1)
 
 This document is the reference for **what NetPulse measures and how**. It is the
 honest contract behind every number the UI shows.
@@ -16,18 +16,21 @@ Each stage is a separate module under `src/lib/`. The orchestrator
 
 | # | Stage | Module | What it produces |
 |---|-------|--------|------------------|
-| 1 | Preflight | `preflight.ts` | Browser, OS, device class, tab foreground state, secure context, IPv4/IPv6 availability, connection type, explicit Cloudflare WARP signal where reported, other VPN/proxy status **unknown**, estimated duration + data |
-| 2 | Server selection | `servers.ts` | Probes each registered candidate (latency samples + trace), ranks by median latency + jitter + availability, picks the best (or a manual choice) and explains why |
-| 3 | Idle latency | `latency.ts` | 14 (10 low-data) zero-byte probes, `performance.now()` timed → min / median / mean / p95 / p99 / jitter / stddev / failed / count |
-| 4 | Download | `throughput.ts` | Discarded warm-up; adaptive request size; **single-connection** then **multi-connection** run; cache-busted, no-store; received payload ÷ actual phase time; timed windows for median/P90/peak/variation; explicit stop reason |
-| 5 | Upload | `throughput.ts` | Discarded generated-payload warm-up; adaptive POST size; parallel non-personal in-memory payloads; server-accepted payload ÷ actual phase time; cumulative accepted-payload observations and browser limitation labels |
+| 1 | Preflight | `preflight.ts` | Browser, OS, device class, tab foreground state, secure context, three family-specific IPv4/IPv6 HTTPS timings, connection type, explicit Cloudflare WARP signal where reported, other VPN/proxy status **unknown**, estimated duration + data |
+| 2 | Server selection | `globalNetwork.ts` + `servers.ts` | Validates a versioned HTTPS endpoint directory; shallow/deep probes compatible candidates; rejects disabled, draining, stale, unavailable, and version-incompatible nodes; ranks latency, jitter, probe consistency, reachability, live health, load, and capacity; retains backups; explains degraded selection |
+| 3 | Idle latency | `latency.ts` | 14 (10 low-data) zero-byte probes, `performance.now()` timed → min / median / mean / interquartile mean / p90 / p95 / p99 / jitter / stddev / failed / count |
+| 4 | Download | `throughput.ts` | Discarded warm-up; adaptive request size and stream count; **single-connection** then **multi-connection** run; cache-busted, no-store; received payload ÷ actual phase time; timed windows for P5/median/P95/peak/variation; explicit stop reason |
+| 5 | Upload | `throughput.ts` | Discarded generated-payload warm-up; adaptive POST size/streams; parallel non-personal in-memory payloads; successfully submitted payload ÷ actual phase time; cumulative successful-response observations and browser limitation labels |
 | 6 | Loaded latency | `throughput.ts` | Continuous probes **during** download and upload, kept separate |
-| 7 | UDP reachability | `packetloss.ts` | **Experimental** WebRTC/STUN connectivity check (see below) — not an end-to-end packet-loss percentage |
+| 7 | Echo and UDP reachability | `packetloss.ts` | Controlled WebSocket message delivery when an endpoint advertises it, otherwise an **experimental** WebRTC/STUN reachability check. Neither is relabeled as network packet loss |
 | 8 | Bufferbloat | `grading.ts` | Loaded − idle latency rise, **separate** for download and upload, graded A–F |
 | 9 | Stability | `grading.ts` | 0–100 score from loaded-latency spread, spikes, worse down/up throughput variation, failed probes/requests, and completion; p95/p99; longest spike; probe completeness |
 | 10 | Network identity | `engine.ts` + `networkIdentity.ts` | Automatic trace: serving edge, client country code, IP family, **masked** IP. ISP/ASN/city/region: validated, explicit opt-in lookup only |
-| 11 | Confidence | `confidence.ts` | 0–100 trust score with exact visible deductions for sampling, variation, server stability, tab visibility, completion, and errors |
-| 12 | Export | `export.ts` | Full JSON: config, candidates, per-metric stats, raw samples, scoring formula, methodology |
+| 11 | Transport telemetry | `transportTelemetry.ts` | Browser `nextHopProtocol` plus explicitly exposed server TCP/QUIC RTT/retransmit headers; missing server telemetry remains unavailable |
+| 12 | Multi-server verification | `secondaryVerification.ts` | A bounded secondary download when an independently probed backup exists; agreement/disagreement is shown and incompatible results are never averaged |
+| 13 | Confidence | `confidence.ts` | 0–100 trust score with exact visible deductions for sampling, variation, server stability, secondary disagreement, tab visibility, completion, and errors |
+| 14 | Accuracy Passport | `accuracyPassport.ts` | Run/version IDs, confidence reasons, client/endpoint/transport facts, family comparison, secondary verification, data, duration, streams, sample and retry counts |
+| 13 | Export/local evidence | `export.ts` + `evidenceStore.ts` | Full JSON plus privacy-filtered raw events and phase journal; latest 20 complete runs retained only on-device in IndexedDB |
 
 ## Timing
 
@@ -43,25 +46,32 @@ read slightly higher than raw ICMP ping because they include TLS/HTTP framing.
   from the timed throughput result.
 - **Cache-busting**: every transfer carries a monotonic unique query string and
   `cache: "no-store"` so a cached body cannot become a measurement.
-- **Single then multi connection**: a single stream reveals per-flow shaping; up
-  to 4 parallel streams (2 in low-data) reveal the line's real ceiling. The
+- **Single then multi connection**: a single stream reveals per-flow shaping;
+  warm-up throughput selects one, two, or up to the profile's maximum parallel
+  streams. The
   headline figure is the multi-connection result.
 - **Reported value**: application payload transferred or accepted divided by
   the phase's actual wall-clock duration. This includes ramp-up instead of
   selecting only faster windows. Download windows are retained for median,
-  P90 capacity context, peak, and variation; the P90 is not substituted for
+  P5, median, P95 capacity context, peak, and variation; no percentile is substituted for
   the aggregate headline. Cloudflare's own test currently documents a P90
   method, which is one reason its headline may differ even on the same network.
-  upload observations update only after a POST is accepted because Fetch does
-  not expose byte-level upload progress.
+  upload observations update only after a POST succeeds because Fetch does
+  not expose byte-level upload progress. A successful response is not a
+  cryptographic server-side byte receipt, so public-endpoint upload is labeled
+  successfully submitted payload rather than independently verified receipt.
 - **Direction isolation**: download and upload run sequentially so each loaded-
   latency result can be attributed to one direction. Running them concurrently
   would be a different full-duplex stress test and would not make either
   directional capacity estimate more comparable to other services.
-- **Worldwide scope**: the current provider is Cloudflare anycast. BGP routes
-  each browser to a serving edge, but peering, congestion, device limits, and
-  the chosen methodology still vary by country and ISP. NetPulse does not use
-  private Ookla or Netflix endpoints and cannot promise identical results.
+- **Worldwide scope**: the checked-in endpoint directory currently contains
+  only Cloudflare anycast. All requested NetPulse-operated regions remain
+  explicitly planned and unsupported. The client can discover and manually
+  select future compatible endpoints, but it does not claim regional coverage
+  until those endpoints pass the independent gate in `GLOBAL_NETWORK.md`.
+  BGP routing, peering, congestion, device limits, and methodology vary by ISP.
+  NetPulse does not use private Ookla or Netflix endpoints and cannot promise
+  identical results.
 - **Early stopping**: for download, once the recent samples' coefficient of variation drops
   below 5% (after a minimum duration and ≥12 samples), the phase stops. This
   saves data without hurting accuracy, and is disclosed in the result.
@@ -72,20 +82,21 @@ read slightly higher than raw ICMP ping because they include TLS/HTTP framing.
   requests can overshoot slightly; displayed data is application payload
   including warm-ups, not exact on-wire usage.
 - **Upload limitation**: Fetch exposes neither byte-level upload progress nor
-  protocol overhead. Reliable upload is accepted payload divided by phase time.
-  Median, peak observation, and variation use cumulative accepted-payload
+  protocol overhead or a server-side byte receipt. Upload is successfully
+  submitted payload divided by phase time. Median, peak observation, and variation use cumulative successful-response
   observations and are labeled as such rather than packet-level windows.
 
-## UDP reachability — why packet loss remains unavailable
+## Echo and UDP reachability — why packet loss remains unavailable
 
-True packet loss requires a sustained UDP flow against a cooperating echo/TURN
-server, which NetPulse does not run yet. Estimating loss from failed HTTP
-requests would be **wrong**, so we don't. Instead the UDP-reachability card runs a
-real, related check: a WebRTC `RTCPeerConnection` gathers ICE candidates against
-public STUN servers. A server-reflexive (`srflx`) candidate means UDP can leave
-your network and reach a STUN server, and we time how long that took. This is
-labeled **experimental** and explicitly is **not** a loss percentage. For a real
-loss figure, the card points users to `ping -n 50 1.1.1.1` (or `-c 50`).
+True packet loss requires a sustained unreliable datagram flow against a
+cooperating echo/TURN service. Estimating it from failed HTTP requests would be
+**wrong**. A compatible lab endpoint now offers a controlled WebSocket echo that
+counts sent, received, late, and observably reordered application messages.
+Because WebSocket runs over reliable TCP, retransmission hides network packet
+loss; its delivery-loss percentage is never called packet loss. Without that
+endpoint, WebRTC/STUN reports only UDP egress reachability and ICE-gathering
+time. A public packet-loss percentage remains unavailable until an unreliable
+WebRTC data-channel protocol passes independent packet-accounting validation.
 
 ## Health score
 

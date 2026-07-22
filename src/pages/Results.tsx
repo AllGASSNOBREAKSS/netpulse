@@ -27,6 +27,56 @@ const IMPACT_GROUPS: { title: string; names: string[] }[] = [
   { title: "Browsing", names: ["Everyday browsing"] },
 ];
 
+function AccuracyPassportPanel({ result }: { result: TestResult }) {
+  const passport = result.accuracyPassport;
+  const verification = passport.secondaryVerification;
+  return (
+    <Panel className="space-y-4" aria-labelledby="accuracy-passport-title">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p id="accuracy-passport-title" className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+            Accuracy Passport
+          </p>
+          <p className="mt-1 text-[14px] font-medium">
+            {passport.confidenceLabel} confidence · {passport.validSampleCount} valid samples
+          </p>
+        </div>
+        <Badge variant="outline">Engine {passport.engineVersion}</Badge>
+      </div>
+      <KeyValueList
+        items={[
+          { k: "Run ID", v: result.runId },
+          { k: "Endpoint", v: passport.endpointLabel, mono: false },
+          { k: "Endpoint health", v: passport.endpointHealth, mono: false },
+          { k: "Endpoint load", v: passport.endpointLoadPct === null ? "not reported" : `${Math.round(passport.endpointLoadPct)}%` },
+          { k: "Streams", v: `${passport.downloadStreams} download · ${passport.uploadStreams} upload` },
+          { k: "Measured payload", v: `${(passport.bytesTransferred / 1_000_000).toFixed(1)} MB` },
+          { k: "Secondary check", v: verification.reason, mono: false },
+          { k: "Secondary method", v: verification.method, mono: false },
+          { k: "IPv4 path", v: formatFamily(passport.ipComparison.ipv4), mono: false },
+          { k: "IPv6 path", v: formatFamily(passport.ipComparison.ipv6), mono: false },
+          { k: "IP-family comparison", v: passport.ipComparison.reason, mono: false },
+          { k: "Browser protocol", v: passport.transportTelemetry.browserProtocol ?? "not exposed" },
+          { k: "Server transport", v: passport.transportTelemetry.serverTransport, mono: false },
+          { k: "Server TCP/QUIC telemetry", v: passport.transportTelemetry.reason, mono: false },
+          { k: "Methodology", v: passport.methodologyVersion },
+        ]}
+      />
+      {passport.reducedConfidenceReasons.length > 0 && (
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-status-warn">Confidence reductions</p>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-[12.5px] leading-relaxed text-muted-foreground">
+            {passport.reducedConfidenceReasons.map((reason) => <li key={reason}>{reason}</li>)}
+          </ul>
+        </div>
+      )}
+      <p className="text-[12px] leading-relaxed text-muted-foreground">
+        Raw events and the phase journal are saved only on this device for the latest 20 runs. No exact public IP is stored.
+      </p>
+    </Panel>
+  );
+}
+
 export function ResultsPage({
   result,
   verdict,
@@ -201,6 +251,7 @@ export function ResultsPage({
           </Section>
 
           <ConfidencePanel confidence={result.confidence} />
+          <AccuracyPassportPanel result={result} />
         </TabsContent>
 
         {/* ---------------------------- Performance ------------------------ */}
@@ -351,7 +402,9 @@ export function ResultsPage({
               </Button>
               {result.packetLoss.status === "experimental" && (
                 <Badge variant="outline" className="text-muted-foreground">
-                  packet loss: experimental UDP-reachability check
+                  {result.packetLoss.transport === "websocket-echo"
+                    ? "packet loss unavailable · WebSocket message delivery measured"
+                    : "packet loss unavailable · experimental UDP-reachability check"}
                 </Badge>
               )}
             </div>
@@ -360,4 +413,10 @@ export function ResultsPage({
       </Tabs>
     </div>
   );
+}
+
+function formatFamily(sample: TestResult["preflight"]["ipComparison"]["ipv4"]): string {
+  return sample.medianMs === null
+    ? `${sample.status} · timing unavailable`
+    : `${sample.medianMs.toFixed(1)} ms median · P95 ${sample.p95Ms?.toFixed(1) ?? "—"} ms · ${sample.successful}/${sample.successful + sample.failed} samples`;
 }

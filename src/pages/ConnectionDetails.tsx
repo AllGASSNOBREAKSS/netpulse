@@ -143,6 +143,11 @@ export function ConnectionDetailsPage({ result }: { result: TestResult | null })
               { k: "Protocol", v: result.server.chosen.protocol, mono: false },
               { k: "IPv4 reachable", v: result.preflight.ipv4 },
               { k: "IPv6 reachable", v: result.preflight.ipv6 },
+              { k: "IPv4 path median", v: result.preflight.ipComparison.ipv4.medianMs === null ? "unavailable" : `${result.preflight.ipComparison.ipv4.medianMs.toFixed(1)} ms` },
+              { k: "IPv6 path median", v: result.preflight.ipComparison.ipv6.medianMs === null ? "unavailable" : `${result.preflight.ipComparison.ipv6.medianMs.toFixed(1)} ms` },
+              { k: "Family comparison", v: result.preflight.ipComparison.reason, mono: false },
+              { k: "Negotiated browser protocol", v: result.transportTelemetry.browserProtocol ?? "not exposed" },
+              { k: "Server transport telemetry", v: result.transportTelemetry.reason, mono: false },
             ]}
           />
         </Section>

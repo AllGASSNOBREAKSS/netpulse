@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { EmptyState, KeyValueList, PageHeader, Panel, Section, StatGrid, StatusPill } from "@/components/np/Layout";
 import { cn } from "@/lib/utils";
+import { saveRawEvidence } from "@/lib/evidenceStore";
 import { runTest, type Phase, type TestResult } from "../lib/engine";
 import { downloadCsv, downloadText } from "../lib/export";
 import {
@@ -96,15 +97,20 @@ export function FixMyInternet() {
     setBusy(true);
     setLiveMbps(null);
     try {
-      return await runTest(
+      const result = await runTest(
         { lowData: true, profile: "quick" },
         {
           onPhase: setPhase,
-          onSample: (s) => {
-            if (s.mbps !== undefined) setLiveMbps(s.mbps);
+          onEvents: (events) => {
+            const latest = [...events].reverse().find((event) => typeof event.data.mbps === "number");
+            if (typeof latest?.data.mbps === "number") setLiveMbps(latest.data.mbps);
           },
         },
       );
+      void saveRawEvidence(result).catch((error: unknown) => {
+        console.warn("NetPulse could not save guided-test evidence locally.", error);
+      });
+      return result;
     } finally {
       setBusy(false);
       setPhase("idle");

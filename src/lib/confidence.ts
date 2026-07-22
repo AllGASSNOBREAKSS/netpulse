@@ -4,7 +4,7 @@
  * reason is surfaced in the UI so the score is explainable.
  */
 import { coefficientOfVariation } from "./stats";
-import type { Confidence, ConfidenceReason } from "./types";
+import type { Confidence, ConfidenceReason, SecondaryVerification } from "./types";
 
 export type ConfidenceInputs = {
   downloadSamples: number[];
@@ -23,6 +23,11 @@ export type ConfidenceInputs = {
   completed: boolean;
   errors: number;
   earlyStopped: boolean;
+  endpointHealth?: "healthy" | "degraded" | "draining" | "unavailable" | "unknown";
+  endpointLoadPct?: number | null;
+  backupEndpointCount?: number;
+  clientLimited?: boolean;
+  secondaryVerification?: SecondaryVerification;
 };
 
 export function computeConfidence(i: ConfidenceInputs): Confidence {
@@ -39,18 +44,18 @@ export function computeConfidence(i: ConfidenceInputs): Confidence {
   add("Download sampling", dlCount >= 12, `${dlCount} streamed throughput windows`, dlCount >= 8 ? 6 : 16);
 
   const ulCount = i.uploadSamples.length;
-  add("Upload sampling", ulCount >= 3, `${ulCount} accepted-payload observations`, ulCount > 0 ? 6 : 18);
+  add("Upload sampling", ulCount >= 3, `${ulCount} successfully submitted payload observations`, ulCount > 0 ? 6 : 18);
 
   const uploadCov = coefficientOfVariation(i.uploadSamples.slice(Math.floor(ulCount / 2)));
   if (ulCount < 2) {
-    add("Upload consistency", false, "Too few accepted-payload observations to assess variation", 8);
+    add("Upload consistency", false, "Too few successfully submitted payload observations to assess variation", 8);
   } else if (uploadCov < 0.15) {
-    add("Upload consistency", true, `Accepted-payload observations were steady (CoV ${uploadCov.toFixed(2)})`);
+    add("Upload consistency", true, `Successfully submitted payload observations were steady (CoV ${uploadCov.toFixed(2)})`);
   } else {
     add(
       "Upload consistency",
       false,
-      `Accepted-payload observations varied (CoV ${uploadCov.toFixed(2)})`,
+      `Successfully submitted payload observations varied (CoV ${uploadCov.toFixed(2)})`,
       uploadCov < 0.3 ? 5 : 10,
     );
   }
@@ -138,6 +143,52 @@ export function computeConfidence(i: ConfidenceInputs): Confidence {
 
   if (i.earlyStopped)
     add("Early stop", true, "Stopped early because samples were already steady");
+
+  if (i.endpointHealth !== undefined) {
+    add(
+      "Endpoint health",
+      i.endpointHealth === "healthy",
+      i.endpointHealth === "healthy" ? "Endpoint reported healthy" : `Endpoint health was ${i.endpointHealth}`,
+      i.endpointHealth === "unknown" ? 4 : i.endpointHealth === "degraded" ? 8 : 12,
+    );
+  }
+  if (i.endpointLoadPct !== undefined) {
+    const endpointLoadPct = i.endpointLoadPct;
+    const known = endpointLoadPct !== null;
+    const healthyLoad = endpointLoadPct !== null && endpointLoadPct < 85;
+    add(
+      "Endpoint load",
+      healthyLoad,
+      endpointLoadPct !== null ? `${Math.round(endpointLoadPct)}% reported endpoint load` : "Endpoint load telemetry unavailable",
+      known ? 10 : 3,
+    );
+  }
+  if (i.backupEndpointCount !== undefined) {
+    add(
+      "Independent endpoint",
+      i.backupEndpointCount > 0,
+      i.backupEndpointCount > 0 ? `${i.backupEndpointCount} compatible backup endpoint(s) passed probing` : "No independent backup endpoint was reachable",
+      4,
+    );
+  }
+  if (i.secondaryVerification !== undefined) {
+    const verification = i.secondaryVerification;
+    if (verification.status === "agree") {
+      add("Secondary throughput", true, `Independent endpoint agreed within ${verification.differencePct?.toFixed(1)}%`);
+    } else if (verification.status === "disagree") {
+      add("Secondary throughput", false, `Independent endpoint differed by ${verification.differencePct?.toFixed(1)}%`, 12);
+    } else {
+      add("Secondary throughput", false, verification.reason, 0);
+    }
+  }
+  if (i.clientLimited !== undefined) {
+    add(
+      "Client calibration",
+      !i.clientLimited,
+      i.clientLimited ? "This browser or device may be limiting measured throughput" : "No client-side calibration warning was detected",
+      12,
+    );
+  }
 
   score = Math.max(0, Math.min(100, Math.round(score)));
   const good = reasons.filter((r) => r.ok).map((r) => r.label.toLowerCase());

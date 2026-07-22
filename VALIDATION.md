@@ -10,7 +10,7 @@ app never does).
 
 ```bash
 npm run check     # typecheck + zero-warning lint + tests + production build
-npm test          # vitest run — 104 tests across 18 files
+npm test          # vitest run — current count is reported by Vitest
 npm run test:watch
 ```
 
@@ -23,6 +23,7 @@ Test files live in `src/lib/__tests__/`:
 | `scoring.test.ts` | weight sum = 100, fast/slow/high-latency/bufferbloat cases, per-component caps |
 | `confidence.test.ts` | foreground vs background, complete vs interrupted, separate sampling factors, exact deductions, errors/server |
 | `servers.test.ts` | ranking by latency+jitter/reachability, intermittent and unavailable candidates, IPv4/IPv6 carried through |
+| `globalNetwork.test.ts` | endpoint-directory and health schema validation, HTTPS-only URLs, duplicate rejection, freshness, and bounded operational telemetry |
 | `throughput.test.ts` | fast byte-capped phases, measured-byte callbacks, endpoint failures, upload byte/time result |
 | `networkIdentity.test.ts` | opt-in response validation, ASN normalization, IP masking, malformed-response rejection |
 | `engine.integration.test.ts` | complete low-data orchestration, phase order, provider-response assembly, privacy masking, loaded latency, upload visibility, and confidence factors |
@@ -36,6 +37,13 @@ Test files live in `src/lib/__tests__/`:
 | `areaPulseSecurity.test.ts` | trusted-header parsing, HMAC separation, signed-request validation, strict report/abuse input, and safe response headers |
 | `planReality.test.ts` | eligible-history filtering, median plan comparison, peak/off-peak and medium coverage, loaded-latency rise, reliability score, and neutral report output |
 | `speedometer.test.ts` | fixed speed-band boundaries, piecewise dial mapping, and clamping for invalid or negative inputs |
+| `preflightIp.test.ts` | family-specific IPv4/IPv6 summaries and evidence-based preferred-path selection |
+| `packetlossEcho.test.ts` | WebSocket echo delivery, late-message, and reorder calculations without inventing network packet loss |
+| `secondaryVerification.test.ts` | bounded independent-server verification, agreement thresholds, and honest unavailable states |
+| `transportTelemetry.test.ts` | bounded explicit TCP/QUIC headers, browser protocol evidence, and generic Server-Timing separation |
+| `historicalIntelligence.test.ts` | ISP-group minimum evidence and local median comparisons |
+| `measurementPipeline.test.ts` | ordered typed phases, cancellation/failure journaling, and bounded event batching |
+| `validationLab.test.ts` | lab evidence schema, privacy rejection, statistical aggregation, and launch gates |
 
 ## Scenario matrix
 
@@ -59,7 +67,7 @@ these tests and never in the production UI.**
 | Throughput HTTP error | `throughput.test.ts` (non-2xx endpoint responses cannot become a 0 Mbps result) |
 | Stable speedometer mapping | `speedometer.test.ts` verifies the fixed 0–100 blue, 100–200 yellow, 200–500 orange, and 500+ red bands without dynamic scale jumps |
 | Interrupted test | `confidence.test.ts` (completed=false → sharp drop); engine try/finally cleanup |
-| IPv4 and IPv6 | `servers.test.ts` (family carried through); `preflight.ts` best-effort family probes |
+| IPv4 and IPv6 | `servers.test.ts` carries endpoint family; `preflightIp.test.ts` verifies independent family-specific HTTPS summaries and comparison rules |
 | Guided Wi-Fi/Ethernet comparison | `diagnostics.test.ts` requires a confirmed Wi-Fi baseline plus material near-router/Ethernet improvement |
 | VPN on/off comparison | `diagnostics.test.ts` requires an explicit confirmed on/off pair; automatic VPN inference is not used |
 | Background traffic comparison | `diagnostics.test.ts` requires a normal-versus-paused compatible pair |
@@ -96,9 +104,11 @@ not claimed as validation of the new aggregation formula:
 
 ## Known gaps
 
-- No end-to-end packet-loss server (loss is experimental UDP reachability only).
-- One production server provider (Cloudflare anycast) is registered; the
-  selection code is multi-server but there is currently one candidate.
+- The isolated validation lab implements a reviewed WebSocket echo endpoint. Production still has no deployed echo endpoint; WebSocket message delivery cannot expose network packet loss hidden by TCP retransmission, so the public fallback keeps packet loss unavailable.
+- One production server provider (Cloudflare anycast) is registered. The
+  versioned directory, load/health/capacity-aware selection, backups, and
+  manual preference are implemented, but all NetPulse-operated regions remain
+  planned and unsupported. See `GLOBAL_NETWORK.md`.
 - A fresh deployed full/low-data live run is required for the corrected
   payload-over-phase-time throughput formula and opt-in identity UI.
 - Environmental scenarios (VPN, mobile, Wi-Fi/Ethernet) rely on manual runs;
@@ -106,6 +116,29 @@ not claimed as validation of the new aggregation formula:
 - Connection Black Box has no default independent second endpoint, persistent
   echo service, or cooperating UDP service. It therefore reports one-endpoint
   HTTPS reachability and leaves true packet loss unavailable.
+
+## Global endpoint-directory foundation validation
+
+On 2026-07-21, the global-network client foundation was validated locally:
+
+- Type checking, zero-warning lint, 19 test files / 123 tests, and the
+  production build passed before the final diff review.
+- The directory parser rejected insecure URLs, duplicate IDs, invalid schema
+  versions, impossible load values, and stale health reports.
+- Ranking tests confirmed that overloaded and unavailable candidates do not
+  beat a similarly routed healthy candidate.
+- The rendered advanced-region selector listed automatic selection plus the
+  single real Cloudflare anycast endpoint; none of the 15 planned NetPulse
+  regions appeared as selectable coverage.
+- A real local low-data browser run completed at 124 Mbps download and 6.8 Mbps
+  upload through Cloudflare EWR. The result disclosed 43 ms selection-probe
+  median, unknown health, unavailable load/capacity/version, no backup, and
+  `0` supported or pilot regions / `15` unavailable regions.
+- The browser console had no warnings or errors. At 375 × 812, the region
+  control remained visible and the page had zero horizontal overflow.
+
+This validates only the client and the existing anycast fallback. It is not
+evidence of regional NetPulse infrastructure or worldwide accuracy.
 
 ## Current runtime validation (corrected aggregation and guided diagnostics)
 

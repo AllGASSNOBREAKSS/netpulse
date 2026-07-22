@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { jitter, mean, median, percentile, stddev, summarize } from "../stats";
+import { interquartileMean, jitter, mean, median, percentile, stddev, summarize } from "../stats";
 
 describe("stats", () => {
   it("median handles odd and even lengths", () => {
@@ -27,11 +27,17 @@ describe("stats", () => {
     expect(jitter([5])).toBe(0);
   });
 
+  it("interquartile mean resists extreme tails", () => {
+    expect(interquartileMean([1, 10, 11, 12, 13, 100])).toBeCloseTo(11.5, 5);
+  });
+
   it("summarize reports p95/p99 and count", () => {
     const s = summarize([10, 20, 30, 40, 50, 60, 70, 80, 90, 100]);
     expect(s.count).toBe(10);
     expect(s.min).toBe(10);
     expect(s.p95).toBeGreaterThan(90);
+    expect(s.p90).toBeGreaterThanOrEqual(90);
+    expect(s.interquartileMean).toBeGreaterThan(30);
     expect(s.p99).toBeGreaterThan(s.p95 - 1);
   });
 });

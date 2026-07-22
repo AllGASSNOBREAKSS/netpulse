@@ -4,12 +4,15 @@
  * The result is versioned (`schemaVersion`). Top-level convenience fields
  * (downloadMbps, idlePingMs, …) mirror values inside the richer nested blocks
  * so older UI and stored history keep working; the nested blocks carry the
- * full statistical detail added in the v2 engine.
+ * full statistical detail added by the current engine.
  */
+import type { EndpointHealthStatus, RegionalCoverage } from "./globalNetwork";
+import type { ClientCalibration } from "./clientCalibration";
+import type { MeasurementEvent, PhaseJournalEntry, PipelinePhase } from "./measurementPipeline";
 import type { Summary } from "./stats";
 export type { Summary };
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 4;
 
 export type Phase =
   | "idle"
@@ -21,6 +24,7 @@ export type Phase =
   | "upload"
   | "packetloss"
   | "done"
+  | "cancelled"
   | "error";
 
 /** Raw event sample streamed to the UI during a run. */
@@ -43,6 +47,7 @@ export type Preflight = {
   secureContext: boolean;
   ipv4: TriState;
   ipv6: TriState;
+  ipComparison: IpFamilyComparison;
   /** navigator.connection.effectiveType when exposed, else null. */
   connectionType: string | null;
   /** Heuristic only — never asserted as fact. */
@@ -59,6 +64,8 @@ export type Preflight = {
 export type ServerProbe = {
   id: string;
   provider: string;
+  regionId: string;
+  regionLabel: string;
   /** Cloudflare three-letter serving data-center code, not a client city. */
   edgeCode: string | null;
   /** Country code reported for the client by the measurement provider. */
@@ -77,13 +84,46 @@ export type ServerProbe = {
   availability: number;
   /** 0–1 relative ranking score (higher is better). */
   rank: number;
+  /** Consistency of observed HTTPS probes, not traceroute/path visibility. */
+  routeConsistency: number;
+  healthStatus: EndpointHealthStatus;
+  loadPct: number | null;
+  capacityMbps: number | null;
+  availableCapacityMbps: number | null;
+  serverVersion: string | null;
+  protocolVersion: number | null;
+  healthReason: string;
+};
+
+export type IpFamilySample = {
+  status: TriState;
+  medianMs: number | null;
+  p95Ms: number | null;
+  jitterMs: number | null;
+  successful: number;
+  failed: number;
+  method: string;
+};
+
+export type IpFamilyComparison = {
+  ipv4: IpFamilySample;
+  ipv6: IpFamilySample;
+  preferred: "IPv4" | "IPv6" | "similar" | "unavailable";
+  differenceMs: number | null;
+  reason: string;
 };
 
 export type ServerSelection = {
   chosen: ServerProbe;
   candidates: ServerProbe[];
+  backups: ServerProbe[];
   reason: string;
   manual: boolean;
+  degraded: boolean;
+  directoryRevision: string;
+  directorySource: "network-directory" | "built-in-fallback";
+  directoryWarning: string | null;
+  coverage: RegionalCoverage[];
 };
 
 /* ---- Throughput ----------------------------------------------------------- */
@@ -92,8 +132,10 @@ export type ThroughputStats = {
   mbps: number;
   peakMbps: number;
   medianMbps: number;
+  p5Mbps: number;
+  p95Mbps: number;
   variationPct: number;
-  samples: number[]; // download windows or accepted-upload observations
+  samples: number[]; // download windows or successfully submitted-upload observations
   cov: number; // coefficient of variation of the stable window
   bytes: number;
   /** Discarded connection warm-up payload, included in total data-use accounting. */
@@ -101,8 +143,14 @@ export type ThroughputStats = {
   warmupSucceeded: boolean;
   /** Adaptive request payload used for the measured phase. */
   requestBytes: number;
+  /** Concurrent requests actually used after warm-up calibration. */
+  streams: number;
+  /** Warm-up throughput used only to select payload and concurrency. */
+  calibrationMbps: number | null;
   durationMs: number;
   earlyStopped: boolean;
+  /** Elapsed phase time when the stable-window early-stop criterion was met. */
+  stableAtMs: number | null;
   stopReason: "stable" | "duration" | "data-cap" | "completed" | "error";
   /** Requests that failed before the phase completed. */
   failedRequests: number;
@@ -139,13 +187,34 @@ export type Stability = {
 
 /* ---- Packet loss (experimental) ------------------------------------------- */
 export type PacketLoss = {
-  status: "experimental" | "unavailable";
+  status: "measured" | "experimental" | "unavailable";
   /** UDP egress reachability via STUN — a real signal, but NOT end-to-end loss. */
   udpReachable: TriState;
   stunRttMs: number | null;
   candidateTypes: string[]; // e.g. ["host","srflx"]
+  transport: "webrtc-stun" | "websocket-echo" | "webrtc-datachannel" | "unavailable";
+  sent: number | null;
+  received: number | null;
+  late: number | null;
+  reordered: number | null;
+  /** Reserved for a validated unreliable-datagram/WebRTC echo protocol. */
+  packetLossPct: number | null;
+  /** WebSocket application-message delivery loss; TCP retransmission hides packet loss. */
+  messageLossPct: number | null;
+  durationMs: number | null;
   method: string;
   note: string;
+};
+
+export type TransportTelemetry = {
+  browserProtocol: string | null;
+  serverTransport: "tcp" | "quic" | "unknown";
+  serverReportedTcpRttMs: number | null;
+  serverReportedQuicRttMs: number | null;
+  serverReportedRetransmits: number | null;
+  serverTiming: string | null;
+  source: "browser-resource-timing" | "server-headers" | "combined" | "unavailable";
+  reason: string;
 };
 
 /* ---- ISP / location ------------------------------------------------------- */
@@ -176,11 +245,64 @@ export type TestConfig = {
    *  light profile used by guided A/B diagnostics (Fix My Internet). */
   profile?: "full" | "lowData" | "quick";
   serverId?: string; // manual server pick
+  signal?: AbortSignal;
+  /** Explicit opt-in phase retry counts. Defaults to zero to avoid hidden data use. */
+  phaseRetries?: Partial<Record<PipelinePhase, number>>;
+};
+
+export type SecondaryVerification = {
+  status: "unavailable" | "latency-only" | "agree" | "disagree";
+  endpointId: string | null;
+  endpointLabel: string | null;
+  primaryMbps: number;
+  secondaryMbps: number | null;
+  differencePct: number | null;
+  bytesTransferred: number;
+  durationMs: number | null;
+  streams: number | null;
+  method: "latency-only" | "lightweight-download" | "unavailable";
+  reason: string;
+};
+
+export type AccuracyPassport = {
+  confidenceScore: number;
+  confidenceLabel: "high" | "moderate" | "low";
+  validSampleCount: number;
+  invalidSampleCount: number;
+  endpointId: string;
+  endpointLabel: string;
+  endpointLoadPct: number | null;
+  endpointHealth: EndpointHealthStatus;
+  secondaryVerification: SecondaryVerification;
+  transportTelemetry: TransportTelemetry;
+  ipComparison: IpFamilyComparison;
+  bytesTransferred: number;
+  durationMs: number;
+  downloadStreams: number;
+  uploadStreams: number;
+  ipFamily: "IPv4" | "IPv6" | "unknown";
+  browserForeground: boolean;
+  engineVersion: string;
+  methodologyVersion: string;
+  phaseRetryCount: number;
+  knownLimitations: string[];
+  reducedConfidenceReasons: string[];
+};
+
+export type RawMeasurementEvidence = {
+  engineVersion: string;
+  methodologyVersion: string;
+  calibration: ClientCalibration;
+  phases: PhaseJournalEntry[];
+  events: MeasurementEvent[];
 };
 
 /* ---- Full result ---------------------------------------------------------- */
 export type TestResult = {
   schemaVersion: number;
+  runId: string;
+  engineVersion: string;
+  methodologyVersion: string;
   timestamp: number;
   durationMs: number;
   lowData: boolean;
@@ -200,8 +322,11 @@ export type TestResult = {
   bufferbloat: Bufferbloat;
   stability: Stability;
   packetLoss: PacketLoss;
+  transportTelemetry: TransportTelemetry;
   ispLocation: IspLocation;
   confidence: Confidence;
+  accuracyPassport: AccuracyPassport;
+  rawEvidence: RawMeasurementEvidence;
 
   dataUsedMB: number;
   limitations: string[];
@@ -224,9 +349,11 @@ export type TestResult = {
 export type EngineCallbacks = {
   onPhase?: (phase: Phase) => void;
   onSample?: (s: Sample) => void;
-  /** Cumulative application payload accepted or received during this run. */
+  /** Cumulative application payload successfully submitted or received during this run. */
   onBytes?: (totalBytes: number) => void;
   onPartial?: (partial: Partial<TestResult>) => void;
   onPreflight?: (p: Preflight) => void;
   onServer?: (s: ServerSelection) => void;
+  /** Buffered progress batches; raw events remain retained in the result. */
+  onEvents?: (events: MeasurementEvent[]) => void;
 };

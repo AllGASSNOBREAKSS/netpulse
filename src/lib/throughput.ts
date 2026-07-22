@@ -5,8 +5,9 @@
  */
 import { getServer } from "./servers";
 import { DOWNLOAD_WARMUP_BYTES, UPLOAD_WARMUP_BYTES } from "./profiles";
-import { coefficientOfVariation, max, median } from "./stats";
+import { coefficientOfVariation, max, median, percentile } from "./stats";
 import { pingOnce } from "./latency";
+import { linkAbortSignal, MeasurementCancelledError, throwIfCancelled } from "./cancellation";
 import type { ThroughputStats } from "./types";
 
 export type LoadOpts = {
@@ -23,6 +24,8 @@ export type LoadOpts = {
   onThroughput?: (mbps: number) => void;
   onRtt?: (rtt: number) => void;
   onBytes?: (total: number) => void;
+  signal?: AbortSignal;
+  onStage?: (stage: "warming-up" | "measuring", warmup?: Warmup) => void;
 };
 
 const SAMPLE_MS = 250; // rolling sample window
@@ -36,6 +39,10 @@ let cacheSequence = 0;
 function cacheBuster(): string {
   cacheSequence = (cacheSequence + 1) % Number.MAX_SAFE_INTEGER;
   return `${Math.round(performance.now() * 1000).toString(36)}-${cacheSequence.toString(36)}`;
+}
+
+function withCacheBuster(url: string): string {
+  return `${url}${url.includes("?") ? "&" : "?"}cb=${cacheBuster()}`;
 }
 
 function adaptiveRequestBytes(
@@ -62,13 +69,14 @@ function randomPayload(bytes: number): ArrayBuffer {
 
 type Warmup = { bytes: number; durationMs: number; succeeded: boolean };
 
-async function downloadWarmup(serverId: string | undefined): Promise<Warmup> {
+async function downloadWarmup(serverId: string | undefined, signal?: AbortSignal): Promise<Warmup> {
   const server = getServer(serverId);
   const ctrl = new AbortController();
+  const unlink = linkAbortSignal(ctrl, signal);
   const timer = setTimeout(() => ctrl.abort(), WARMUP_TIMEOUT_MS);
   const started = performance.now();
   try {
-    const response = await fetch(`${server.downPath(DOWNLOAD_WARMUP_BYTES)}&cb=${cacheBuster()}`, {
+    const response = await fetch(withCacheBuster(server.downPath(DOWNLOAD_WARMUP_BYTES)), {
       cache: "no-store",
       signal: ctrl.signal,
     });
@@ -76,20 +84,23 @@ async function downloadWarmup(serverId: string | undefined): Promise<Warmup> {
     const bytes = (await response.arrayBuffer()).byteLength;
     return { bytes, durationMs: performance.now() - started, succeeded: bytes > 0 };
   } catch {
+    throwIfCancelled(signal);
     return { bytes: 0, durationMs: performance.now() - started, succeeded: false };
   } finally {
     clearTimeout(timer);
+    unlink();
   }
 }
 
-async function uploadWarmup(serverId: string | undefined): Promise<Warmup> {
+async function uploadWarmup(serverId: string | undefined, signal?: AbortSignal): Promise<Warmup> {
   const server = getServer(serverId);
   const body = randomPayload(UPLOAD_WARMUP_BYTES);
   const ctrl = new AbortController();
+  const unlink = linkAbortSignal(ctrl, signal);
   const timer = setTimeout(() => ctrl.abort(), WARMUP_TIMEOUT_MS);
   const started = performance.now();
   try {
-    const response = await fetch(`${server.upPath}?cb=${cacheBuster()}`, {
+    const response = await fetch(withCacheBuster(server.upPath), {
       method: "POST",
       body,
       cache: "no-store",
@@ -100,10 +111,26 @@ async function uploadWarmup(serverId: string | undefined): Promise<Warmup> {
       ? { bytes: body.byteLength, durationMs, succeeded: true }
       : { bytes: 0, durationMs, succeeded: false };
   } catch {
+    throwIfCancelled(signal);
     return { bytes: 0, durationMs: performance.now() - started, succeeded: false };
   } finally {
     clearTimeout(timer);
+    unlink();
   }
+}
+
+function warmupMbps(warmup: Warmup): number | null {
+  return warmup.succeeded && warmup.bytes > 0 && warmup.durationMs > 0
+    ? (warmup.bytes * 8) / warmup.durationMs / 1000
+    : null;
+}
+
+function calibratedStreams(configured: number, calibrationMbps: number | null): number {
+  if (configured <= 1 || calibrationMbps === null) return Math.max(1, configured);
+  if (calibrationMbps < 10) return 1;
+  if (calibrationMbps < 100) return Math.min(configured, 2);
+  if (calibrationMbps < 500) return Math.min(configured, 4);
+  return configured;
 }
 
 function waitForProbeCadence(ms: number, signal: AbortSignal): Promise<void> {
@@ -123,7 +150,7 @@ function waitForProbeCadence(ms: number, signal: AbortSignal): Promise<void> {
  * Shared load runner. The authoritative result is transferred application
  * payload divided by the phase's actual elapsed time. Download progress can be
  * sampled from streamed chunks; browsers do not expose upload progress, so
- * upload progress is the cumulative accepted payload rate after each POST.
+ * upload progress is the cumulative successfully submitted payload rate after each POST.
  */
 async function runLoad(
   opts: LoadOpts,
@@ -138,6 +165,9 @@ async function runLoad(
   ) => Promise<void>,
 ): Promise<ThroughputStats & { rtts: number[] }> {
   const ctrl = new AbortController();
+  const unlink = linkAbortSignal(ctrl, opts.signal);
+  const calibrationMbps = warmupMbps(warmup);
+  const streams = calibratedStreams(opts.streams, calibrationMbps);
   const samples: number[] = [];
   const rtts: number[] = [];
   let windowBytes = 0;
@@ -145,6 +175,7 @@ async function runLoad(
   let failedRequests = 0;
   let failedProbes = 0;
   let earlyStopped = false;
+  let stableAtMs: number | null = null;
   let durationExpired = false;
   const start = performance.now();
   let windowStartedAt = start;
@@ -184,6 +215,7 @@ async function runLoad(
       const stable = samples.slice(Math.floor(samples.length / 2));
       if (coefficientOfVariation(stable) < EARLY_STOP_COV) {
         earlyStopped = true;
+        stableAtMs = elapsed;
         ctrl.abort();
       }
     }
@@ -213,7 +245,7 @@ async function runLoad(
   let probing = true;
   const prober = (async () => {
     while (probing && !ctrl.signal.aborted) {
-      const rtt = await pingOnce(opts.serverId);
+      const rtt = await pingOnce(opts.serverId, undefined, opts.signal);
       // Keep a probe that started while load was active even if the load phase
       // reached its byte cap before the HTTP round trip finished.
       if (rtt !== null) {
@@ -235,16 +267,28 @@ async function runLoad(
   // discarded, otherwise a fast connection can incorrectly report 0 Mbps.
   if (direction === "download") flushDownloadSample(loadEndedAt, true);
   probing = false;
-  await prober;
+  try {
+    await prober;
+  } catch (error) {
+    unlink();
+    throw error;
+  }
+
+  if (opts.signal?.aborted) {
+    unlink();
+    throw new MeasurementCancelledError();
+  }
 
   if (totalBytes === 0) {
+    unlink();
     throw new Error(
       `${direction === "download" ? "Download" : "Upload"} measurement failed: the test endpoint transferred no usable data.`,
     );
   }
 
   const durationMs = loadEndedAt - start;
-  if (failedRequests >= opts.streams && durationMs < opts.minDurationMs && totalBytes < opts.maxBytes) {
+  if (failedRequests >= streams && durationMs < opts.minDurationMs && totalBytes < opts.maxBytes) {
+    unlink();
     throw new Error(
       `${direction === "download" ? "Download" : "Upload"} measurement failed: every stream stopped before the minimum measurement duration.`,
     );
@@ -255,10 +299,21 @@ async function runLoad(
   // upload progress.
   opts.onThroughput?.(mbps);
 
-  return {
+  const stopReason: ThroughputStats["stopReason"] = earlyStopped
+    ? "stable"
+    : durationExpired
+      ? "duration"
+      : totalBytes >= opts.maxBytes
+        ? "data-cap"
+        : failedRequests > 0
+          ? "error"
+          : "completed";
+  const result: ThroughputStats & { rtts: number[] } = {
     mbps,
     peakMbps: Math.max(mbps, max(samples)),
     medianMbps: samples.length ? median(samples) : mbps,
+    p5Mbps: samples.length ? percentile(samples, 5) : mbps,
+    p95Mbps: samples.length ? percentile(samples, 95) : mbps,
     variationPct: Math.round(coefficientOfVariation(samples) * 1000) / 10,
     samples,
     cov: coefficientOfVariation(samples.slice(Math.floor(samples.length / 2))),
@@ -266,26 +321,26 @@ async function runLoad(
     warmupBytes: warmup.bytes,
     warmupSucceeded: warmup.succeeded,
     requestBytes,
+    streams,
+    calibrationMbps,
     durationMs,
     earlyStopped,
-    stopReason: earlyStopped
-      ? "stable"
-      : durationExpired
-        ? "duration"
-        : totalBytes >= opts.maxBytes
-          ? "data-cap"
-          : failedRequests > 0
-            ? "error"
-            : "completed",
+    stableAtMs,
+    stopReason,
     failedRequests,
     failedProbes,
     rtts,
   };
+  unlink();
+  return result;
 }
 
 export async function downloadPhase(opts: LoadOpts) {
   const server = getServer(opts.serverId);
-  const warmup = await downloadWarmup(opts.serverId);
+  throwIfCancelled(opts.signal);
+  opts.onStage?.("warming-up");
+  const warmup = await downloadWarmup(opts.serverId, opts.signal);
+  opts.onStage?.("measuring", warmup);
   const requestBytes = adaptiveRequestBytes(warmup.bytes, warmup.durationMs, opts.chunkBytes, "download");
   const measuredOpts = {
     ...opts,
@@ -295,13 +350,14 @@ export async function downloadPhase(opts: LoadOpts) {
   opts.onBytes?.(warmup.bytes);
   return runLoad(measuredOpts, "download", warmup, requestBytes, (signal, count, cap, fail) => {
     const workers: Promise<void>[] = [];
-    for (let w = 0; w < opts.streams; w++) {
+    const streams = calibratedStreams(opts.streams, warmupMbps(warmup));
+    for (let w = 0; w < streams; w++) {
       workers.push(
         (async () => {
           while (!signal.aborted && !cap()) {
             try {
               // Cache-buster query + no-store defeat any intermediary caching.
-              const url = `${server.downPath(requestBytes)}&cb=${cacheBuster()}`;
+              const url = withCacheBuster(server.downPath(requestBytes));
               const res = await fetch(url, { cache: "no-store", signal });
               if (!res.ok) {
                 fail();
@@ -335,7 +391,10 @@ export async function downloadPhase(opts: LoadOpts) {
 
 export async function uploadPhase(opts: LoadOpts) {
   const server = getServer(opts.serverId);
-  const warmup = await uploadWarmup(opts.serverId);
+  throwIfCancelled(opts.signal);
+  opts.onStage?.("warming-up");
+  const warmup = await uploadWarmup(opts.serverId, opts.signal);
+  opts.onStage?.("measuring", warmup);
   const requestBytes = adaptiveRequestBytes(warmup.bytes, warmup.durationMs, opts.chunkBytes, "upload");
   // Non-personal payload generated in memory. Web Crypto limits each call to
   // 65,536 bytes, so fill every chunk rather than leaving compressible zeroes.
@@ -348,12 +407,13 @@ export async function uploadPhase(opts: LoadOpts) {
   opts.onBytes?.(warmup.bytes);
   return runLoad(measuredOpts, "upload", warmup, requestBytes, (signal, count, cap, fail) => {
     const workers: Promise<void>[] = [];
-    for (let w = 0; w < opts.streams; w++) {
+    const streams = calibratedStreams(opts.streams, warmupMbps(warmup));
+    for (let w = 0; w < streams; w++) {
       workers.push(
         (async () => {
           while (!signal.aborted && !cap()) {
             try {
-              const res = await fetch(`${server.upPath}?cb=${cacheBuster()}`, {
+              const res = await fetch(withCacheBuster(server.upPath), {
                 method: "POST",
                 body,
                 cache: "no-store",
