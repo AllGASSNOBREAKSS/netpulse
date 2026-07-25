@@ -28,7 +28,7 @@ The endpoint returns cache-busted, `no-store` application payload. A dedicated W
 stage capacity Mbps = total bytes from every stream × 8 ÷ one shared stage window in milliseconds ÷ 1,000
 ```
 
-The stream ramp is 1 → 2 → 4 → 6 → 8 in the full profile. A higher stage runs only while aggregate throughput continues improving by at least 5%, subject to the duration and byte ceilings. Request payloads target a useful transfer interval and grow with measured per-stream capacity. In the five-stage Full profile, the per-stage shares are 3%, 4%, 18%, 10%, and 65%, preserving enough payload for an approximately four-second final stage near 1 Gbps. **Maximum Capacity** is the fastest stage that reaches the minimum comparison duration when one exists; otherwise the fastest real stage is retained with an explicit limited-confidence reason. **Reliable Throughput** is the median of the stable half of real 500 ms windows from the highest completed stage using at most four streams; single-stream throughput is also retained.
+The stream ramp is 1 → 2 → 4 → 6 → 8 in the full profile. A higher stage runs only while aggregate throughput continues improving by at least 5%, subject to duration, statistical, and hard byte ceilings. Request payloads grow from measured warm-up throughput. **Maximum Capacity** is the highest P50 fixed-window rate among stages qualified for duration, bytes, samples, variation, endpoint health, completion, cache, compression, and receipt evidence. **Reliable Throughput** is P25 of stable windows from the best qualified stage using at most four requests. **Single Stream** is P50 from the dedicated one-request stage. Short or prematurely data-capped evidence is labeled **Quick estimate.** Invalid or internally inconsistent evidence is **inconclusive** and is not published as a definitive number.
 
 All timing uses `performance.now()`. Request diagnostics retain TTFB and transfer-only duration, but the capacity denominator deliberately covers the complete shared stage, including request turnover. Failed and aborted requests remain visible evidence and reduce confidence. A response that explicitly reports non-identity content encoding is rejected. Completed response payload is counted from the bytes actually read, not trusted from `Content-Length`.
 
@@ -42,7 +42,25 @@ NetPulse creates one non-personal, in-memory random payload per upload stage in 
 upload Mbps = successfully submitted application payload bytes × 8 ÷ actual phase milliseconds ÷ 1,000
 ```
 
-Fetch does not expose byte-level upload progress. Live upload observations therefore use cumulative successfully submitted payload over elapsed time. When a provider exposes an allowlisted received-byte receipt such as `cf-meta-upload-bytes`, NetPulse uses that received count and retains it in request diagnostics; it does not invent a receipt when the header is absent. Aborted partial bodies, HTTP/TLS/TCP/IP overhead, retransmissions, and link-layer overhead are excluded.
+Fetch does not expose byte-level upload progress. Live upload observations
+therefore use per-request accepted bytes divided by the receipt's server
+duration when exposed, otherwise the browser request duration. They never use
+cumulative completion rate as a stable sample. When a provider exposes an
+allowlisted received-byte receipt such as `cf-meta-upload-bytes`, NetPulse uses
+that received count and retains it in request diagnostics; it does not invent a
+receipt when the header is absent. Aborted partial bodies, HTTP/TLS/TCP/IP
+overhead, retransmissions, and link-layer overhead are excluded.
+
+An exposed upload receipt must match the submitted request payload before that stage can enter the publication pool. A mismatch is retained in the Accuracy Passport and the affected stage is excluded.
+
+## Result publication
+
+- Confidence below 60% is labeled **Low-confidence estimate.**
+- Insufficient duration or data is labeled **Quick estimate.**
+- Inconclusive throughput is shown as unavailable, never as zero.
+- Inconclusive throughput is omitted from history and health-score weighting.
+- NetPulse does not describe browser results as accuracy-certified.
+- The current test uses one Cloudflare anycast measurement origin. Independent endpoint verification is not yet available, and routing or endpoint conditions can influence results.
 
 ### Duration, streams, and data
 

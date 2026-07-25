@@ -25,8 +25,7 @@ const MAX_HISTORY = 50;
 
 export function loadHistory(): HistoryEntry[] {
   try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "[]");
-    return Array.isArray(parsed) ? parsed.filter(isHistoryEntry).slice(0, MAX_HISTORY) : [];
+    return parseHistory(localStorage.getItem(HISTORY_KEY));
   } catch (error) {
     console.warn("NetPulse could not read local test history.", error);
     return [];
@@ -35,10 +34,19 @@ export function loadHistory(): HistoryEntry[] {
 
 export function saveHistory(entries: HistoryEntry[]): void {
   try {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(entries.slice(0, MAX_HISTORY)));
+    localStorage.setItem(HISTORY_KEY, serializeHistory(entries));
   } catch (error) {
     console.warn("NetPulse could not save local test history.", error);
   }
+}
+
+export function serializeHistory(entries: HistoryEntry[]): string {
+  return JSON.stringify(entries.filter(isHistoryEntry).slice(0, MAX_HISTORY));
+}
+
+export function parseHistory(serialized: string | null): HistoryEntry[] {
+  const parsed: unknown = JSON.parse(serialized ?? "[]");
+  return Array.isArray(parsed) ? parsed.filter(isHistoryEntry).slice(0, MAX_HISTORY) : [];
 }
 
 function isHistoryEntry(value: unknown): value is HistoryEntry {
@@ -47,7 +55,9 @@ function isHistoryEntry(value: unknown): value is HistoryEntry {
   return (
     typeof entry.ts === "number" &&
     typeof entry.down === "number" &&
+    Number.isFinite(entry.down) &&
     typeof entry.up === "number" &&
+    Number.isFinite(entry.up) &&
     typeof entry.ping === "number" &&
     typeof entry.bloat === "number" &&
     typeof entry.grade === "string" &&

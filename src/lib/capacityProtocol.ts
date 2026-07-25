@@ -1,6 +1,7 @@
 import type { DirectionCapacity, StreamDiagnostic } from "./types";
 
 export type CapacityPlan = {
+  runId: string;
   direction: "download" | "upload";
   downloadUrlTemplate: string;
   uploadUrl: string;
@@ -14,6 +15,14 @@ export type CapacityPlan = {
   stageMinMs: number;
   stageMaxMs: number;
   finalStageMinMs: number;
+  stageMinBytes: number;
+  minValidSamples: number;
+  maxVariationPct: number;
+  receiptTolerancePct: number;
+  receiptToleranceBytes: number;
+  profileMode: "full" | "lowData" | "quick";
+  endpointHealth: "healthy" | "degraded" | "draining" | "unavailable" | "unknown";
+  allowEarlyStatisticalStop: boolean;
   improvementThresholdPct: number;
   progressIntervalMs: number;
   latencyProbeIntervalMs: number;

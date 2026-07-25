@@ -79,4 +79,30 @@ describe("result confidence", () => {
     const c = computeConfidence({ ...base, downloadWarmupSucceeded: false });
     expect(c.reasons.find((r) => r.label === "Download warm-up")?.penalty).toBe(4);
   });
+
+  it("caps low-data confidence even when the reduced run is otherwise clean", () => {
+    const c = computeConfidence({ ...base, profileMode: "lowData" });
+    expect(c.score).toBeLessThanOrEqual(65);
+    expect(c.reasons.find((r) => r.label === "Profile confidence ceiling")?.ok).toBe(false);
+  });
+
+  it("penalizes quick estimates and inconclusive metric evidence", () => {
+    const quick = computeConfidence({ ...base, downloadPublication: "quick-estimate" });
+    const inconclusive = computeConfidence({ ...base, downloadPublication: "inconclusive" });
+    expect(quick.score).toBeLessThan(computeConfidence(base).score);
+    expect(inconclusive.score).toBeLessThan(quick.score);
+  });
+
+  it("penalizes upload receipt disagreement more than partial receipt identity", () => {
+    const partial = computeConfidence({ ...base, uploadReceiptStatus: "partial" });
+    const mismatch = computeConfidence({ ...base, uploadReceiptStatus: "mismatch" });
+    expect(mismatch.score).toBeLessThan(partial.score);
+    expect(mismatch.reasons.find((r) => r.label === "Upload receipt")?.penalty).toBe(25);
+  });
+
+  it("penalizes semantic inversion and phase retries", () => {
+    const c = computeConfidence({ ...base, semanticConsistency: false, phaseRetryCount: 1 });
+    expect(c.reasons.find((r) => r.label === "Metric semantics")?.penalty).toBe(25);
+    expect(c.reasons.find((r) => r.label === "Phase retry")?.penalty).toBe(6);
+  });
 });

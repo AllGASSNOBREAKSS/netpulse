@@ -1,6 +1,6 @@
 param(
   [ValidateSet("smoke", "full")][string]$Matrix = "smoke",
-  [ValidateRange(1, 100)][int]$Repetitions = 3,
+  [ValidateRange(1, 100)][int]$Repetitions = 5,
   [ValidateSet("chromium", "firefox", "webkit")][string[]]$Browsers = @("chromium")
 )
 

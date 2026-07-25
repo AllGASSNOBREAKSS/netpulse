@@ -3,7 +3,7 @@ import { computeScore, type ScorePart } from "./scoring";
 
 /** Turns raw metrics into a health score, activity grades, and a diagnosis. */
 
-export type Grade = "Excellent" | "Good" | "Fair" | "Poor";
+export type Grade = "Excellent" | "Good" | "Fair" | "Poor" | "Unavailable";
 
 export type Verdict = {
   score: number; // 0–100
@@ -20,6 +20,8 @@ export function judge(r: TestResult): Verdict {
   // ---- Score (100) — formula lives in src/lib/scoring.ts ----
   const { total: score, parts: breakdown } = computeScore(r);
   const spikeRatio = r.probeCount > 0 ? r.spikes / r.probeCount : 0;
+  const downloadMbps = r.publication.download.valueMbps;
+  const uploadMbps = r.publication.upload.valueMbps;
 
   // ---- Headline ----
   let headline: string;
@@ -60,50 +62,50 @@ export function judge(r: TestResult): Verdict {
     },
     {
       name: "4K streaming",
-      grade: g(r.downloadMbps > 50, r.downloadMbps > 25, r.downloadMbps > 15),
-      note: `${fmt(r.downloadMbps)} Mbps measured · capacity estimate uses 25 Mbps per stream`,
+      grade: downloadMbps === null ? "Unavailable" : g(downloadMbps > 50, downloadMbps > 25, downloadMbps > 15),
+      note: downloadMbps === null ? "Download measurement was inconclusive." : `${fmt(downloadMbps)} Mbps measured · capacity estimate uses 25 Mbps per stream`,
     },
     {
       name: "Video calls",
-      grade: g(
-        r.uploadMbps > 8 && loadedWorst < 120,
-        r.uploadMbps > 3.5 && loadedWorst < 200,
-        r.uploadMbps > 1.5,
+      grade: uploadMbps === null ? "Unavailable" : g(
+        uploadMbps > 8 && loadedWorst < 120,
+        uploadMbps > 3.5 && loadedWorst < 200,
+        uploadMbps > 1.5,
       ),
-      note: `${r.uploadMbps.toFixed(1)} Mbps up, ${Math.round(loadedWorst)}ms loaded`,
+      note: uploadMbps === null ? "Upload measurement was inconclusive." : `${uploadMbps.toFixed(1)} Mbps up, ${Math.round(loadedWorst)}ms loaded`,
     },
     {
       name: "Cloud gaming",
-      grade: g(
-        r.downloadMbps > 45 && r.idlePingMs < 30 && r.idleJitterMs < 8,
-        r.downloadMbps > 35 && r.idlePingMs < 45,
-        r.downloadMbps > 20 && r.idlePingMs < 70,
+      grade: downloadMbps === null ? "Unavailable" : g(
+        downloadMbps > 45 && r.idlePingMs < 30 && r.idleJitterMs < 8,
+        downloadMbps > 35 && r.idlePingMs < 45,
+        downloadMbps > 20 && r.idlePingMs < 70,
       ),
-      note: "needs steady low latency",
+      note: downloadMbps === null ? "Download measurement was inconclusive." : "needs steady low latency",
     },
     {
       name: "Livestreaming",
-      grade: g(r.uploadMbps > 20 && spikeRatio === 0, r.uploadMbps > 10, r.uploadMbps > 6),
-      note: `${r.uploadMbps.toFixed(1)} Mbps upload · ${Math.round(r.loadedUpPingMs)} ms upload-loaded median`,
+      grade: uploadMbps === null ? "Unavailable" : g(uploadMbps > 20 && spikeRatio === 0, uploadMbps > 10, uploadMbps > 6),
+      note: uploadMbps === null ? "Upload measurement was inconclusive." : `${uploadMbps.toFixed(1)} Mbps upload · ${Math.round(r.loadedUpPingMs)} ms upload-loaded median`,
     },
     {
       name: "Cloud backups",
-      grade: g(r.uploadMbps > 40, r.uploadMbps > 15, r.uploadMbps > 5),
-      note: `1 GB in ~${formatDuration(8000 / Math.max(r.uploadMbps, 0.1))}`,
+      grade: uploadMbps === null ? "Unavailable" : g(uploadMbps > 40, uploadMbps > 15, uploadMbps > 5),
+      note: uploadMbps === null ? "Upload measurement was inconclusive." : `1 GB in ~${formatDuration(8000 / Math.max(uploadMbps, 0.1))}`,
     },
     {
       name: "Large downloads",
-      grade: g(r.downloadMbps > 200, r.downloadMbps > 75, r.downloadMbps > 20),
-      note: `10 GB in ~${formatDuration(80_000 / Math.max(r.downloadMbps, 0.1))} at the measured phase rate`,
+      grade: downloadMbps === null ? "Unavailable" : g(downloadMbps > 200, downloadMbps > 75, downloadMbps > 20),
+      note: downloadMbps === null ? "Download measurement was inconclusive." : `10 GB in ~${formatDuration(80_000 / Math.max(downloadMbps, 0.1))} at the measured phase rate`,
     },
     {
       name: "General browsing",
-      grade: g(
-        r.downloadMbps > 25 && r.idlePingMs < 60,
-        r.downloadMbps > 10,
-        r.downloadMbps > 3,
+      grade: downloadMbps === null ? "Unavailable" : g(
+        downloadMbps > 25 && r.idlePingMs < 60,
+        downloadMbps > 10,
+        downloadMbps > 3,
       ),
-      note: `${fmt(r.downloadMbps)} Mbps down · ${Math.round(r.idlePingMs)} ms idle · ${Math.round(Math.max(r.loadedDownPingMs, r.loadedUpPingMs))} ms loaded`,
+      note: downloadMbps === null ? "Download measurement was inconclusive." : `${fmt(downloadMbps)} Mbps down · ${Math.round(r.idlePingMs)} ms idle · ${Math.round(Math.max(r.loadedDownPingMs, r.loadedUpPingMs))} ms loaded`,
     },
     {
       name: "Smart-home usage",
@@ -119,10 +121,12 @@ export function judge(r: TestResult): Verdict {
   // ---- Good / bad ----
   const good: string[] = [];
   const bad: string[] = [];
-  if (r.downloadMbps >= 100) good.push(`Strong download capacity (${fmt(r.downloadMbps)} Mbps)`);
-  else if (r.downloadMbps < 25) bad.push(`Low download capacity (${fmt(r.downloadMbps)} Mbps)`);
-  if (r.uploadMbps >= 20) good.push(`Healthy upload (${fmt(r.uploadMbps)} Mbps)`);
-  else if (r.uploadMbps < 5) bad.push(`Weak upload (${fmt(r.uploadMbps)} Mbps) — calls and backups will feel it`);
+  if (downloadMbps === null) bad.push("Download capacity was inconclusive; re-run before drawing a conclusion.");
+  else if (downloadMbps >= 100) good.push(`Strong download capacity (${fmt(downloadMbps)} Mbps)`);
+  else if (downloadMbps < 25) bad.push(`Low download capacity (${fmt(downloadMbps)} Mbps)`);
+  if (uploadMbps === null) bad.push("Upload capacity was inconclusive; re-run before drawing a conclusion.");
+  else if (uploadMbps >= 20) good.push(`Healthy upload (${fmt(uploadMbps)} Mbps)`);
+  else if (uploadMbps < 5) bad.push(`Weak upload (${fmt(uploadMbps)} Mbps) — calls and backups will feel it`);
   if (r.idlePingMs < 20) good.push(`Low idle latency (${Math.round(r.idlePingMs)}ms)`);
   else if (r.idlePingMs > 60) bad.push(`High idle latency (${Math.round(r.idlePingMs)}ms)`);
   if (r.idleJitterMs < 5) good.push("Very steady latency (low jitter)");
@@ -141,15 +145,18 @@ export function judge(r: TestResult): Verdict {
     actions.push(
       "Most likely high-value action: if your router supports SQM / Smart Queue Management, test it — the measured latency increase is consistent with queueing under load.",
     );
-    if (r.downloadMbps > 100)
+    if (downloadMbps !== null && downloadMbps > 100)
       dontBuy = "A faster download tier by itself. This run measured ample download capacity and a latency-under-load problem; more capacity does not guarantee better queue control.";
   }
   if (r.idleJitterMs > 15 || r.spikes > 1)
     actions.push("Possible local-link instability: compare one Ethernet run with one Wi-Fi run. The browser cannot identify Wi-Fi interference or signal strength directly.");
-  if (r.uploadMbps < 5)
+  if (uploadMbps !== null && uploadMbps < 5)
     actions.push("Check your plan's advertised upload speed — many cable plans are heavily asymmetric, and this may be all you're paying for.");
   if (r.idlePingMs > 60)
     actions.push("Possible route or access-network latency: repeat without a VPN if one is active, then compare endpoints. This run cannot identify DSL, cable, fiber, or satellite technology.");
+  if (downloadMbps === null || uploadMbps === null) {
+    actions.push("Repeat the affected throughput phase in Full mode; NetPulse withheld the inconclusive value instead of treating it as zero.");
+  }
   if (actions.length === 0)
     actions.push("Nothing urgent. Save this result as your baseline and re-test when something feels slow — the comparison is the diagnosis.");
 

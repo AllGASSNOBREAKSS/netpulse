@@ -30,6 +30,20 @@ const IMPACT_GROUPS: { title: string; names: string[] }[] = [
 function AccuracyPassportPanel({ result }: { result: TestResult }) {
   const passport = result.accuracyPassport;
   const verification = passport.secondaryVerification;
+  const publicationReasons = [...new Set([
+    ...result.capacity.download.publication.maximum.reasons.map((reason) => `Download: ${reason}`),
+    ...result.capacity.download.publication.reliable.reasons.map((reason) => `Download reliable: ${reason}`),
+    ...result.capacity.upload.publication.maximum.reasons.map((reason) => `Upload: ${reason}`),
+    ...result.capacity.upload.publication.reliable.reasons.map((reason) => `Upload reliable: ${reason}`),
+  ])];
+  const qualificationReasons = [
+    ...passport.stageQualification.download
+      .filter((stage) => stage.status !== "qualified")
+      .flatMap((stage) => stage.reasons.map((reason) => `Download ${stage.stageId}: ${reason}`)),
+    ...passport.stageQualification.upload
+      .filter((stage) => stage.status !== "qualified")
+      .flatMap((stage) => stage.reasons.map((reason) => `Upload ${stage.stageId}: ${reason}`)),
+  ];
   return (
     <Panel className="space-y-4" aria-labelledby="accuracy-passport-title">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -40,6 +54,11 @@ function AccuracyPassportPanel({ result }: { result: TestResult }) {
           <p className="mt-1 text-[14px] font-medium">
             {passport.confidenceLabel} confidence · {passport.validSampleCount} valid samples
           </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Badge variant="outline">{result.publication.outcome.replaceAll("-", " ")}</Badge>
+            {result.publication.labels.map((label) => <Badge key={label} variant="outline">{label}</Badge>)}
+            <Badge variant="outline">Not accuracy-certified</Badge>
+          </div>
         </div>
         <Badge variant="outline">Engine {passport.engineVersion}</Badge>
       </div>
@@ -60,13 +79,33 @@ function AccuracyPassportPanel({ result }: { result: TestResult }) {
           { k: "Server transport", v: passport.transportTelemetry.serverTransport, mono: false },
           { k: "Server TCP/QUIC telemetry", v: passport.transportTelemetry.reason, mono: false },
           { k: "Methodology", v: passport.methodologyVersion },
+          { k: "Throughput basis", v: result.capacity.download.publication.comparisonBasis, mono: false },
         ]}
       />
+      <p className="text-[12px] leading-relaxed text-muted-foreground" role="note">
+        {result.publication.disclosures.join(" ")}
+      </p>
       {passport.reducedConfidenceReasons.length > 0 && (
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-status-warn">Confidence reductions</p>
           <ul className="mt-2 list-disc space-y-1 pl-5 text-[12.5px] leading-relaxed text-muted-foreground">
             {passport.reducedConfidenceReasons.map((reason) => <li key={reason}>{reason}</li>)}
+          </ul>
+        </div>
+      )}
+      {publicationReasons.length > 0 && (
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-status-warn">Publication evidence</p>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-[12.5px] leading-relaxed text-muted-foreground">
+            {publicationReasons.map((reason) => <li key={reason}>{reason}</li>)}
+          </ul>
+        </div>
+      )}
+      {qualificationReasons.length > 0 && (
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-status-warn">Stage qualification</p>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-[12.5px] leading-relaxed text-muted-foreground">
+            {qualificationReasons.map((reason) => <li key={reason}>{reason}</li>)}
           </ul>
         </div>
       )}
@@ -121,13 +160,16 @@ export function ResultsPage({
 
   /** Metric cells that drill into the "how this is measured" detail modal. */
   const metricStats = (ids: string[]): Stat[] =>
-    METRICS.filter((m) => ids.includes(m.id)).map((m) => ({
-      label: m.name,
-      value: m.value(result) ?? "—",
-      hint: m.sub?.(result) ?? undefined,
-      badge: m.experimental ? "EXP" : undefined,
-      onClick: () => onOpenMetric(m.id),
-    }));
+    METRICS.filter((m) => ids.includes(m.id)).map((m) => {
+      const value = m.value(result);
+      return {
+        label: m.name,
+        value: value ?? "Measurement inconclusive",
+        hint: m.sub?.(result) ?? (value === null ? "No definitive value is published." : undefined),
+        badge: m.experimental ? "EXP" : undefined,
+        onClick: () => onOpenMetric(m.id),
+      };
+    });
 
   const tabCls =
     "data-[state=active]:bg-card data-[state=active]:text-foreground text-[13px] transition-colors";
@@ -260,14 +302,14 @@ export function ResultsPage({
 
           <Section
             title="Download throughput"
-            description="250 ms measured windows — single connection, then multi connection."
+            description="Worker-timed observations across the dedicated one-request stage and adaptive multi-request ramp."
           >
             <Panel padded={false} className="p-4 sm:p-5">
               <ThroughputChart result={result} dir="download" />
             </Panel>
           </Section>
 
-          <Section title="Upload throughput" description="250 ms measured windows.">
+          <Section title="Upload throughput" description="Per-receipt accepted-payload observations; Fetch does not expose upload progress.">
             <Panel padded={false} className="p-4 sm:p-5">
               <ThroughputChart result={result} dir="upload" />
             </Panel>

@@ -139,11 +139,14 @@ measured. A configured netem value is not itself observed ground truth.
 
 Upload receipt reconciliation:
 
-- client completed bytes equal server accepted bytes for every successful
-  request;
+- client completed bytes and server accepted bytes agree within
+  `max(65,536 bytes, 0.5% of attempted bytes)` for every successful request;
 - no partial/failed body is counted;
 - server duration fields are monotonic and internally consistent;
-- aggregate discrepancy is zero application bytes.
+- receipt/test/stage IDs match and receipt IDs are unique when the endpoint
+  implements versioned identity;
+- partial provider receipts remain disclosed and cannot establish
+  server-timing authority.
 
 Packet-loss certification:
 
@@ -223,9 +226,11 @@ regions, versions, tolerances, failures, and raw privacy-safe aggregates.
 
 ## 12. Current status and next gate
 
-The repository contains a controlled-lab design and local source validation,
-but Docker/netem/iperf3 execution was blocked on this host and no native iOS
-trial was available. Every certification segment is therefore unmeasured.
+The repository contains a controlled-lab design, 160 deterministic
+stage-selection trials, and local source validation. Deterministic fixtures are
+not production measurements. Docker/netem/iperf3 execution was blocked on this
+host and no native iOS trial was available. Every certification segment is
+therefore unmeasured.
 
 Next gate: run a three-tier Chromium smoke matrix on a Docker-enabled,
 headroom-verified host, then five affected-iPhone trials with exported

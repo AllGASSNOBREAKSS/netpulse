@@ -10,6 +10,8 @@ import type {
   ThroughputStats,
   TransportTelemetry,
   IpFamilyComparison,
+  ResultPublication,
+  DirectionCapacity,
 } from "./types";
 
 export function buildAccuracyPassport(input: {
@@ -30,6 +32,9 @@ export function buildAccuracyPassport(input: {
   secondaryVerification: SecondaryVerification;
   transportTelemetry: TransportTelemetry;
   ipComparison: IpFamilyComparison;
+  resultPublication: ResultPublication;
+  downloadCapacity: DirectionCapacity;
+  uploadCapacity: DirectionCapacity;
 }): AccuracyPassport {
   const failedRequests = input.download.failedRequests + input.upload.failedRequests;
   const failedProbes = input.idleFailed + input.download.failedProbes + input.upload.failedProbes;
@@ -62,5 +67,27 @@ export function buildAccuracyPassport(input: {
     phaseRetryCount,
     knownLimitations: [...input.limitations],
     reducedConfidenceReasons,
+    resultPublication: {
+      ...input.resultPublication,
+      labels: [...input.resultPublication.labels],
+      outcomeReasons: [...input.resultPublication.outcomeReasons],
+      download: { ...input.resultPublication.download, reasons: [...input.resultPublication.download.reasons] },
+      upload: { ...input.resultPublication.upload, reasons: [...input.resultPublication.upload.reasons] },
+      disclosures: [...input.resultPublication.disclosures],
+    },
+    stageQualification: {
+      download: input.downloadCapacity.stages.map((stage) => ({
+        stageId: stage.stageId,
+        streams: stage.streams,
+        status: stage.qualification.status,
+        reasons: [...stage.qualification.reasons],
+      })),
+      upload: input.uploadCapacity.stages.map((stage) => ({
+        stageId: stage.stageId,
+        streams: stage.streams,
+        status: stage.qualification.status,
+        reasons: [...stage.qualification.reasons],
+      })),
+    },
   };
 }

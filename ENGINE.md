@@ -54,13 +54,17 @@ read slightly higher than raw ICMP ping because they include TLS/HTTP framing.
   transport connection. NetPulse does not claim eight independent TCP/QUIC
   connections; that requires multiple validated endpoint origins, which are
   not deployed today.
-- **Maximum Capacity**: total application payload across every stream divided by
-  one shared monotonic stage window. Only stages that reach the configured
-  comparison duration qualify when at least one such stage exists; otherwise
-  the result is retained with an explicit data-cap limitation.
-- **Reliable Throughput**: the median of the stable half of real 500 ms windows
-  from the highest completed stage using at most four streams. P5, P95, peak,
-  variation, and the single-stream result remain separate.
+- **Maximum Capacity**: highest fixed-window P50 from a stage qualified for
+  duration, bytes, samples, variation, endpoint health, completion, cache,
+  compression, and receipt evidence. Exact shared-window aggregate Mbps remains
+  raw evidence.
+- **Reliable Throughput**: P25 of stable windows from the best qualified stage
+  using at most four requests.
+- **Single Stream**: P50 from the dedicated one-request stage, published only
+  when that stage passes the same qualification rules.
+- **Publication state**: short or prematurely data-capped evidence is a
+  **Quick estimate**. Receipt mismatches or non-comparable evidence are
+  **inconclusive** and are not published as definitive values.
 - **Measurement isolation**: fetch streaming and throughput statistics run in a
   Web Worker. React receives throttled progress targets at most every 100 ms;
   gauge RAF interpolation never defines or changes measurement timing.
@@ -102,9 +106,10 @@ read slightly higher than raw ICMP ping because they include TLS/HTTP framing.
 - **Upload limitation**: Fetch exposes neither byte-level upload progress nor
   protocol overhead. The fallback provider can expose a received-byte count,
   but not the complete NetPulse upload receipt in `TEST_NODE_PROTOCOL.md`.
-  Upload is acknowledged/submitted payload divided by phase time. Median, peak
-  observation, and variation use cumulative successful-response observations
-  and are labeled as such rather than packet-level windows.
+  Upload samples use per-request accepted bytes divided by server receive
+  duration when exposed, otherwise browser request duration. They are
+  receipt observations, not packet-level windows, and cumulative completion
+  rate is not used as a stable sample.
 
 ## Echo and UDP reachability — why packet loss remains unavailable
 

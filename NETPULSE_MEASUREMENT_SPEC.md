@@ -1,6 +1,6 @@
 # NetPulse browser measurement specification
 
-Status: Phase 1 architecture draft
+Status: Phase 2 local implementation contract
 Normative terms: MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY are used as
 requirements for future NetPulse releases.
 
@@ -157,16 +157,17 @@ ends after stage completion/stop. It includes request setup, TTFB, turnover,
 browser scheduling, and transfer. Transfer-only request throughput is
 diagnostic evidence and MUST NOT replace the shared-window denominator.
 
-Peak Capacity is the maximum aggregate rate among stages that meet the
-profile's minimum comparison duration. If no stage qualifies, the fastest real
-stage MAY be retained as limited evidence but MUST NOT be labeled validated
-capacity.
+Maximum Capacity is the highest P50 fixed-window rate among stages that pass
+duration, bytes, sample-count, variation, endpoint-health, completion, cache,
+compression, and receipt qualification. If no stage qualifies, valid evidence
+MAY be a quick estimate but MUST NOT be definitive.
 
-Reliable Throughput is the median of a documented stable portion of 500 ms
-aggregate byte windows from a completed stage with no more than four active
-requests. The result MUST include P5, median, P95, peak, CoV, sample count,
-stage duration, request count, and bytes. Fewer than two retained windows MUST
-produce `limited`, not `measured`.
+Reliable Throughput is P25 of stable fixed-window observations from the best
+qualified stage using no more than four active requests. Single-stream
+throughput is P50 from the dedicated one-request stage. Because all products
+use the same qualified pool, maximum capacity normally exceeds or equals both.
+An inversion after recalculation makes the affected metric inconclusive; values
+MUST NOT be clamped, swapped, or sorted.
 
 ### 6.2 Upload
 
@@ -309,15 +310,17 @@ Brier = mean((confidence / 100 - within_tolerance)^2)
 
 Publication gates:
 
-- `completed`: all mandatory phases succeeded and evidence is internally
-  consistent;
-- `low-confidence`: mandatory phases succeeded but visible trust factors fall
-  below the release threshold;
-- `failed`: a mandatory phase failed or byte/timing evidence is inconsistent;
+- `complete`: all mandatory phases and evidence gates succeeded;
+- `complete-with-limitations`: valid measurements with explicit endpoint or
+  browser limitations;
+- `quick-estimate`: usable evidence without full duration/data/sample/ramp
+  qualification;
+- `low-confidence`: mandatory phases succeeded below the 60% threshold;
+- `inconclusive`: evidence exists but cannot support a definitive metric;
+- `incomplete` or `failed`: mandatory evidence is absent or invalid;
 - `cancelled`: the user or lifecycle cancelled the run.
 
-Only the first two may enter completed history, and their status MUST remain
-attached.
+Only results with non-null published headline metrics enter numeric history.
 
 ## 12. Accuracy Passport
 
@@ -354,6 +357,6 @@ thresholds, confidence, or evidence schema require:
 4. updated methodology and accuracy documentation;
 5. release review confirming no old history is silently reinterpreted.
 
-The current local engine identifies itself as `4.0.1-local` with methodology
-`2026.07.25-high-speed-capacity-local`. These identifiers MUST change before a
-reviewed production release.
+The Phase 2 local engine identifies itself as `4.1.0` with methodology
+`2026.07.25-phase2-semantics-v1`. Both exact identifiers are retained in
+the Accuracy Passport and raw evidence.

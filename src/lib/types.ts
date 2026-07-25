@@ -150,10 +150,33 @@ export type StreamDiagnostic = {
   cacheControl: string | null;
   contentEncoding: string | null;
   contentLength: number | null;
+  /** Application payload the client attempted to submit for this request. */
+  clientAttemptedBytes: number;
   /** Provider receipt when explicitly exposed (for example cf-meta-upload-bytes). */
   serverAcceptedBytes: number | null;
+  /** Server-side receive duration when a versioned receipt exposes it. */
+  serverReceiveDurationMs: number | null;
+  /** Versioned receipt metadata. Cloudflare's byte-only header is partial evidence. */
+  uploadReceipt: UploadReceiptEvidence | null;
   outcome: "completed" | "aborted" | "failed";
   failureReason: string | null;
+};
+
+export type UploadReceiptStatus = "verified" | "partial" | "missing" | "mismatch" | "invalid";
+
+export type UploadReceiptEvidence = {
+  status: UploadReceiptStatus;
+  receiptId: string | null;
+  version: string | null;
+  testId: string | null;
+  stageId: string | null;
+  complete: boolean | null;
+  attemptedBytes: number;
+  receivedBytes: number | null;
+  serverDurationMs: number | null;
+  disagreementBytes: number | null;
+  disagreementPct: number | null;
+  reasons: string[];
 };
 
 export type ThroughputStats = {
@@ -190,27 +213,51 @@ export type ThroughputStats = {
 };
 
 export type CapacityStage = {
+  stageId: string;
   streams: number;
   aggregateMbps: number;
   medianMbps: number;
+  trimmedMeanMbps: number;
   p5Mbps: number;
+  p50Mbps: number;
   p95Mbps: number;
   peakMbps: number;
   variationPct: number;
-  /** Download: timed 500 ms windows. Upload: cumulative completed-response observations. */
+  coefficientOfVariation: number;
+  /** Fixed-duration application-byte windows for both download and upload. */
   samples: number[];
+  validWindowCount: number;
   bytes: number;
   durationMs: number;
   requestBytes: number;
   failedRequests: number;
   failedProbes: number;
   improvementPct: number | null;
-  stopReason: "duration" | "data-cap" | "completed" | "error";
+  stopReason: "stable" | "duration" | "data-cap" | "completed" | "error";
+  rampState: "baseline" | "ramping" | "saturation" | "ceiling";
+  endpointHealth: "healthy" | "degraded" | "draining" | "unavailable" | "unknown";
+  qualification: StageQualification;
   diagnostics: StreamDiagnostic[];
 };
 
+export type StageQualificationStatus = "qualified" | "estimate-only" | "rejected";
+
+export type StageQualification = {
+  status: StageQualificationStatus;
+  durationQualified: boolean;
+  bytesQualified: boolean;
+  samplesQualified: boolean;
+  variationQualified: boolean;
+  endpointQualified: boolean;
+  completionQualified: boolean;
+  receiptQualified: boolean;
+  cacheQualified: boolean;
+  compressionQualified: boolean;
+  reasons: string[];
+};
+
 export type ReliableThroughput = {
-  status: "measured" | "limited";
+  status: "measured" | "quick-estimate" | "inconclusive";
   mbps: number;
   singleStreamMbps: number;
   medianMbps: number;
@@ -225,6 +272,26 @@ export type ReliableThroughput = {
   durationMs: number;
   method: string;
   limitation: string | null;
+};
+
+export type ThroughputPublicationStatus = "measured" | "quick-estimate" | "inconclusive";
+
+export type ThroughputMetricPublication = {
+  status: ThroughputPublicationStatus;
+  valueMbps: number | null;
+  reasons: string[];
+};
+
+export type DirectionPublication = {
+  maximum: ThroughputMetricPublication;
+  reliable: ThroughputMetricPublication;
+  singleStream: ThroughputMetricPublication;
+  comparisonBasis: string;
+  excludedStageCount: number;
+  semanticConsistency: {
+    valid: boolean;
+    reasons: string[];
+  };
 };
 
 export type DirectionCapacity = {
@@ -246,6 +313,7 @@ export type DirectionCapacity = {
   requestCompressionObserved: boolean;
   workerUsed: boolean;
   reducedConfidenceReasons: string[];
+  publication: DirectionPublication;
 };
 
 /* ---- Bufferbloat ---------------------------------------------------------- */
@@ -377,6 +445,21 @@ export type AccuracyPassport = {
   phaseRetryCount: number;
   knownLimitations: string[];
   reducedConfidenceReasons: string[];
+  resultPublication: ResultPublication;
+  stageQualification: {
+    download: Array<{ stageId: string; streams: number; status: StageQualificationStatus; reasons: string[] }>;
+    upload: Array<{ stageId: string; streams: number; status: StageQualificationStatus; reasons: string[] }>;
+  };
+};
+
+export type ResultPublication = {
+  accuracyCertified: false;
+  labels: Array<"Low-confidence estimate." | "Quick estimate.">;
+  outcome: "complete" | "complete-with-limitations" | "quick-estimate" | "low-confidence" | "inconclusive" | "incomplete" | "failed";
+  outcomeReasons: string[];
+  download: ThroughputMetricPublication;
+  upload: ThroughputMetricPublication;
+  disclosures: string[];
 };
 
 export type RawMeasurementEvidence = {
@@ -420,6 +503,7 @@ export type TestResult = {
   transportTelemetry: TransportTelemetry;
   ispLocation: IspLocation;
   confidence: Confidence;
+  publication: ResultPublication;
   accuracyPassport: AccuracyPassport;
   rawEvidence: RawMeasurementEvidence;
 

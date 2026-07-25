@@ -163,7 +163,29 @@ function buildDiagnostic(input: {
     cacheControl: input.response?.cacheControl ?? null,
     contentEncoding: input.response?.contentEncoding ?? null,
     contentLength: input.response?.contentLength ?? null,
+    clientAttemptedBytes: input.direction === "upload" ? input.bytes : 0,
     serverAcceptedBytes: input.response?.serverAcceptedBytes ?? null,
+    serverReceiveDurationMs: null,
+    uploadReceipt: input.direction === "upload"
+      ? {
+          status: input.response?.serverAcceptedBytes === null || input.response === null ? "missing" : "partial",
+          receiptId: null,
+          version: null,
+          testId: null,
+          stageId: null,
+          complete: null,
+          attemptedBytes: input.bytes,
+          receivedBytes: input.response?.serverAcceptedBytes ?? null,
+          serverDurationMs: null,
+          disagreementBytes: input.response?.serverAcceptedBytes === null || input.response === null
+            ? null
+            : Math.abs(input.response.serverAcceptedBytes - input.bytes),
+          disagreementPct: input.response?.serverAcceptedBytes === null || input.response === null || input.bytes <= 0
+            ? null
+            : Math.abs(input.response.serverAcceptedBytes - input.bytes) / input.bytes * 100,
+          reasons: ["Legacy throughput path does not expose versioned receipt identity."],
+        }
+      : null,
     outcome: input.outcome,
     failureReason: input.failureReason,
   };

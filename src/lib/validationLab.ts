@@ -2,7 +2,15 @@ import { coefficientOfVariation, mean, median, percentile } from "./stats";
 
 export const VALIDATION_LAB_SCHEMA_VERSION = 1;
 
-export type ValidationStatus = "complete" | "failed" | "aborted";
+export type ValidationStatus =
+  | "complete"
+  | "complete-with-limitations"
+  | "quick-estimate"
+  | "low-confidence"
+  | "inconclusive"
+  | "incomplete"
+  | "failed"
+  | "aborted";
 export type ValidationBrowser = "chromium" | "firefox" | "webkit" | "chrome" | "edge" | "safari" | "other";
 export type ValidationFault = "none" | "endpoint-failure" | "intermittent-outage" | "route-change";
 
@@ -115,6 +123,8 @@ export type ValidationSummary = {
   meanDurationMs: number | null;
   downloadFailureRatePct: number;
   uploadFailureRatePct: number;
+  inconclusiveRatePct: number;
+  quickEstimateRatePct: number;
   tolerance: ValidationTolerance;
   passesLaunchGate: boolean;
 };
@@ -195,7 +205,9 @@ export function parseValidationDataset(input: unknown): ValidationDataset {
 }
 
 export function summarizeValidationRuns(runs: ValidationRun[], key = "all"): ValidationSummary {
-  const complete = runs.filter((run) => run.outcome.status === "complete");
+  const complete = runs.filter((run) =>
+    run.outcome.status === "complete" || run.outcome.status === "complete-with-limitations"
+  );
   const downloadErrors = collectErrors(complete, "downloadMbps");
   const uploadErrors = collectErrors(complete, "uploadMbps");
   const latencyErrors = complete.flatMap((run) => {
@@ -234,6 +246,8 @@ export function summarizeValidationRuns(runs: ValidationRun[], key = "all"): Val
     meanDurationMs: aggregate(complete.map((run) => run.outcome.durationMs), mean),
     downloadFailureRatePct: runs.length === 0 ? 0 : (runs.filter((run) => run.outcome.downloadFailed).length / runs.length) * 100,
     uploadFailureRatePct: runs.length === 0 ? 0 : (runs.filter((run) => run.outcome.uploadFailed).length / runs.length) * 100,
+    inconclusiveRatePct: runs.length === 0 ? 0 : (runs.filter((run) => run.outcome.status === "inconclusive").length / runs.length) * 100,
+    quickEstimateRatePct: runs.length === 0 ? 0 : (runs.filter((run) => run.outcome.status === "quick-estimate").length / runs.length) * 100,
     tolerance,
     passesLaunchGate: false,
   };
@@ -346,7 +360,16 @@ function parseRun(value: unknown, reasons: string[]): ValidationRun | null {
   const region = string(environment.region, "environment.region", reasons, 100);
   const endpointId = string(environment.endpointId, "environment.endpointId", reasons, 100);
   const baselineSource = enumValue(baseline.source, ["iperf3-and-ping", "iperf3", "ping", "configured-only"], "baseline.source", reasons);
-  const outcomeStatus = enumValue(outcome.status, ["complete", "failed", "aborted"], "outcome.status", reasons);
+  const outcomeStatus = enumValue(outcome.status, [
+    "complete",
+    "complete-with-limitations",
+    "quick-estimate",
+    "low-confidence",
+    "inconclusive",
+    "incomplete",
+    "failed",
+    "aborted",
+  ], "outcome.status", reasons);
   const packetLossStatus = enumValue(outcome.packetLossStatus, ["measured", "unavailable"], "outcome.packetLossStatus", reasons);
   const endpointHealthStatus = enumValue(outcome.endpointHealthStatus, ["healthy", "degraded", "draining", "unavailable", "unknown"], "outcome.endpointHealthStatus", reasons);
   const downloadFailed = boolean(outcome.downloadFailed, "outcome.downloadFailed", reasons);
@@ -386,7 +409,7 @@ function parseRun(value: unknown, reasons: string[]): ValidationRun | null {
     || durationMs === null || dataTransferredBytes === null || unavailableReasons === null) return null;
 
   if (schemaVersion !== VALIDATION_LAB_SCHEMA_VERSION) reasons.push(`Unsupported schemaVersion ${schemaVersion}.`);
-  if (outcomeStatus === "complete" && (outcomeDownloadMbps === null
+  if ((outcomeStatus === "complete" || outcomeStatus === "complete-with-limitations") && (outcomeDownloadMbps === null
     || outcomeUploadMbps === null
     || outcomeIdleLatencyMs === null)) {
     reasons.push("Completed runs require download, upload, and idle-latency measurements.");

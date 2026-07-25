@@ -243,8 +243,9 @@ record these trials against iperf3 and controlled shaping.
   or upload progress.
 - Resource Timing may withhold per-request protocol even with
   `Timing-Allow-Origin`.
-- The full profile can use up to about 903 MB plus bounded in-flight overshoot;
-  users must see the preflight budget before starting.
+- The Phase 2 full profile has a roughly 3.0 GB application-payload hard
+  ceiling plus bounded in-flight overshoot and a 1.2 GB typical estimate; users
+  must see the preflight budget before starting.
 - A best result at eight streams reduces confidence because the ramp may still
   be client/profile limited.
 - Native iOS, Android, controlled 100/500/1,000 Mbps, and multi-gigabit launch
@@ -253,3 +254,18 @@ record these trials against iperf3 and controlled shaping.
 Public-launch status for gigabit accuracy remains **not validated**. The local
 implementation is suitable for native-device and controlled-lab review, not a
 global accuracy claim.
+
+## Phase 2 local addendum
+
+Engine `4.1.0` / methodology
+`2026.07.25-phase2-semantics-v1` adds qualified-window P50 maximum capacity,
+P25 reliable throughput, dedicated one-request P50, explicit stage
+qualification, upload receipt identity/accounting validation, low-data
+confidence ceilings, and honesty-gate outcomes.
+
+Twenty deterministic semantic trials ran at 10, 25, 50, 100, 300, 500, 1,000,
+and 2,500 Mbps. They validate scale-independent selection and invariants, not
+real browser accuracy. Docker/tc/iperf3 and five controlled browser trials per
+tier remain blocked because the local Docker engine is unavailable. Full
+results and limitations are in
+[PHASE_2_VALIDATION_REPORT.md](PHASE_2_VALIDATION_REPORT.md).

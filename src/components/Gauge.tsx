@@ -63,11 +63,13 @@ export function Gauge({
   const currentBand = speedBand(valueMbps);
   const speedColor = BAND_COLORS[currentBand];
   const idle = !active && !done && !hasMeasured;
-  const numeral = formatValue(valueMbps);
+  const numeral = done && finalMbps === null ? "—" : formatValue(valueMbps);
   const [capX, capY] = polar(angle, R_ARC);
 
-  const status = done && finalMbps !== null
-    ? `${formatValue(finalMbps)} megabits per second`
+  const status = done
+    ? finalMbps !== null
+      ? `${formatValue(finalMbps)} megabits per second`
+      : "measurement inconclusive"
     : active
       ? "measuring"
       : hasMeasured

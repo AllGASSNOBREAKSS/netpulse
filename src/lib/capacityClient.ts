@@ -5,8 +5,11 @@ import { getServer } from "./servers";
 import type { DirectionCapacity, StreamDiagnostic } from "./types";
 
 export type CapacityClientOptions = {
+  runId: string;
   serverId: string;
   direction: "download" | "upload";
+  profileMode: "full" | "lowData" | "quick";
+  endpointHealth: CapacityPlan["endpointHealth"];
   profile: {
     ramp: readonly number[];
     maxMs: number;
@@ -16,6 +19,10 @@ export type CapacityClientOptions = {
     stageMinMs: number;
     stageMaxMs: number;
     finalStageMinMs: number;
+    stageMinBytes: number;
+    minValidSamples: number;
+    maxVariationPct: number;
+    allowEarlyStatisticalStop: boolean;
   };
   signal?: AbortSignal;
   onProgress?: (mbps: number, streams: number) => void;
@@ -28,6 +35,7 @@ export type CapacityClientOptions = {
 function createPlan(options: CapacityClientOptions): CapacityPlan {
   const server = getServer(options.serverId);
   return {
+    runId: options.runId,
     direction: options.direction,
     downloadUrlTemplate: server.downloadUrlTemplate,
     uploadUrl: server.upPath,
@@ -43,6 +51,14 @@ function createPlan(options: CapacityClientOptions): CapacityPlan {
     stageMinMs: options.profile.stageMinMs,
     stageMaxMs: options.profile.stageMaxMs,
     finalStageMinMs: options.profile.finalStageMinMs,
+    stageMinBytes: options.profile.stageMinBytes,
+    minValidSamples: options.profile.minValidSamples,
+    maxVariationPct: options.profile.maxVariationPct,
+    receiptTolerancePct: 0.5,
+    receiptToleranceBytes: 65_536,
+    profileMode: options.profileMode,
+    endpointHealth: options.endpointHealth,
+    allowEarlyStatisticalStop: options.profile.allowEarlyStatisticalStop,
     improvementThresholdPct: 5,
     progressIntervalMs: 100,
     latencyProbeIntervalMs: 500,
