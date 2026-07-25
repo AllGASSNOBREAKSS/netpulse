@@ -23,6 +23,9 @@
    Tailwind is imported as its three parts instead of `@import "tailwindcss"`
    so Preflight can be layered; unlayered Preflight silently overrides Astryx
    theme CSS. See `npx astryx docs migration` → Cascade Layer Safety. */
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/space-grotesk";
+
 @layer reset, theme, base, astryx-base, astryx-theme, np-legacy, components, utilities;
 
 @import "tailwindcss/theme.css" layer(theme);
@@ -72,6 +75,11 @@
   --chart-4: #7048c9;
   --chart-5: #c4342b;
 
+  --speed-blue: #0b5fd9;
+  --speed-yellow: #d6a900;
+  --speed-orange: #d76500;
+  --speed-red: #c4342b;
+
   --sidebar: #f4f5f7;
   --sidebar-foreground: #101114;
   --sidebar-primary: #0b5fd9;
@@ -115,6 +123,11 @@
   --chart-3: #f0a93b;
   --chart-4: #a98bff;
   --chart-5: #f2635a;
+
+  --speed-blue: #4b8dff;
+  --speed-yellow: #f2d34f;
+  --speed-orange: #f59e0b;
+  --speed-red: #f2635a;
 
   --sidebar: #0e0f12;
   --sidebar-foreground: #f4f5f7;
@@ -173,10 +186,10 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 
-  --font-sans: "Geist", system-ui, sans-serif;
-  --font-mono: "Geist Mono", ui-monospace, monospace;
-  --font-display: "Exo 2", "Geist", system-ui, sans-serif;
-  --font-wordmark: "Baloo 2", "Geist", system-ui, sans-serif;
+  --font-sans: "Geist Variable", system-ui, sans-serif;
+  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --font-display: "Space Grotesk Variable", "Geist Variable", system-ui, sans-serif;
+  --font-wordmark: "Space Grotesk Variable", "Geist Variable", system-ui, sans-serif;
 }
 
 @layer base {

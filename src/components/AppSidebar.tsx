@@ -57,14 +57,14 @@ const GROUPS: { label: string; items: Item[] }[] = [
     label: "Monitor",
     items: [
       { view: "blackbox", label: "Connection Black Box", icon: Activity },
-      { view: "areapulse", label: "Area Pulse", icon: Radar, soon: true },
+      { view: "areapulse", label: "Area Pulse", icon: Radar },
     ],
   },
   {
     label: "Insights",
     items: [
       { view: "history", label: "History", icon: History },
-      { view: "planreality", label: "Plan Reality Check", icon: ScrollText, soon: true },
+      { view: "planreality", label: "Plan Reality Check", icon: ScrollText },
       { view: "reports", label: "Saved Reports", icon: BookOpen, soon: true },
     ],
   },

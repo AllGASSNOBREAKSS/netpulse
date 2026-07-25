@@ -126,7 +126,8 @@ export function ScoreDetail({
   return (
     <Modal title={`Health score — ${score}/100`} onClose={onClose}>
       <p className="mi__intro">
-        The score is the sum of six weighted components, each computed from measured data only.
+        The score is the sum of seven weighted components computed from measured or derived data.
+        Packet loss is disclosed as an unscored row until NetPulse has a valid end-to-end measurement.
         The formula is defined in one documented file (<code>src/lib/scoring.ts</code>) — this
         panel renders it directly.
       </p>
@@ -148,11 +149,13 @@ export function ScoreDetail({
               <td className="score-table__input">{p.input}</td>
               <td className="num">
                 <div className="score-table__pts">
-                  {p.earned} <span className="score-table__weight">/ {p.weight}</span>
+                  {p.scored ? p.earned : "Not scored"}{p.scored && <span className="score-table__weight"> / {p.weight}</span>}
                 </div>
-                <div className="score-bar">
-                  <span className="score-bar__fill" style={{ width: `${(p.earned / p.weight) * 100}%` }} />
-                </div>
+                {p.scored && (
+                  <div className="score-bar">
+                    <span className="score-bar__fill" style={{ width: `${(p.earned / p.weight) * 100}%` }} />
+                  </div>
+                )}
               </td>
             </tr>
           ))}

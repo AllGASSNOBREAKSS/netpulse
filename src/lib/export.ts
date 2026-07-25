@@ -3,15 +3,17 @@
  * measured, plus a human-readable methodology block. The full public IP is
  * never included — only the masked form travels in exports.
  */
-import { BLOAT_FORMULA } from "./grading";
+import { BLOAT_FORMULA, STABILITY_FORMULA } from "./grading";
 import { SCORE_RULES } from "./scoring";
+import { percentile } from "./stats";
 import type { TestResult } from "./types";
 import type { Verdict } from "./verdict";
 
 export const METHODOLOGY = [
-  "NetPulse measures against the Cloudflare speed endpoint (speed.cloudflare.com), an anycast service that routes you to the nearest of Cloudflare's edge locations. Results reflect the path to that edge and will differ from Ookla, Fast.com, Cloudflare's own test, or M-Lab, which use different servers, server counts, and aggregation methods. We do not tune NetPulse to match any of them.",
+  "NetPulse measures against the endpoint selected from its validated directory. The checked-in public fallback is Cloudflare anycast; future NetPulse-operated regions remain unsupported until deployed and independently validated. Results reflect the chosen route and can differ from Ookla, Fast.com, Cloudflare, or M-Lab because servers, stream counts, duration, and aggregation differ. We do not tune NetPulse to match them.",
   "Latency is measured with zero-byte HTTPS requests timed by performance.now() (monotonic, sub-millisecond). HTTP round-trips read slightly higher than raw ICMP ping.",
-  "Throughput uses cache-busted, no-store requests. Download runs single-connection then multi-connection. Each reported result is measured application payload divided by the phase's actual elapsed time; download windows and accepted-upload observations show variation. Phases stop early once samples are steady, or at a duration/payload cap.",
+  "Throughput uses discarded connection warm-ups, adaptive request payloads, adaptive concurrency, and cache-busted no-store requests. Maximum, reliable, and single-stream products use the same pool of duration-qualified, receipt-consistent stage aggregates. Short or data-limited evidence is published only as a quick estimate; inconsistent evidence is inconclusive.",
+  "Download and upload run sequentially so loaded latency stays attributable to one direction. A simultaneous full-duplex stress test answers a different question and would not make NetPulse identical to services using different endpoints or aggregation methods.",
   "Loaded latency is probed continuously during download and upload; bufferbloat is the increase over idle, graded separately per direction.",
   "Packet loss is unavailable: the experimental WebRTC/STUN card reports UDP reachability, not an end-to-end loss percentage.",
   "The automatic Cloudflare trace supplies only a country code, serving edge code, IP family, and masked IP. ISP, ASN, city, and region are not inferred. The optional metadata lookup is user-initiated and is not part of test exports.",
@@ -21,11 +23,15 @@ export function buildExport(result: TestResult, verdict: Verdict | null) {
   return {
     tool: "NetPulse",
     schemaVersion: result.schemaVersion,
+    runId: result.runId,
+    engineVersion: result.engineVersion,
+    methodologyVersion: result.methodologyVersion,
     generatedAt: new Date(result.timestamp).toISOString(),
     methodology: METHODOLOGY,
     scoringFormula: {
-      health: SCORE_RULES.map((r) => ({ id: r.id, label: r.label, weight: r.weight, rule: r.rule })),
+      health: SCORE_RULES.map((r) => ({ id: r.id, label: r.label, weight: r.weight, scored: r.scored !== false, rule: r.rule })),
       bufferbloat: BLOAT_FORMULA,
+      stability: STABILITY_FORMULA,
     },
     config: { lowData: result.lowData },
     preflight: result.preflight,
@@ -38,6 +44,7 @@ export function buildExport(result: TestResult, verdict: Verdict | null) {
     results: {
       score: verdict?.score ?? null,
       confidence: result.confidence,
+      publication: result.publication,
       download: result.download,
       upload: result.upload,
       idleLatency: result.idleLatency,
@@ -51,7 +58,9 @@ export function buildExport(result: TestResult, verdict: Verdict | null) {
     dataTransferredMB: Math.round(result.dataUsedMB),
     durationMs: Math.round(result.durationMs),
     limitations: result.limitations,
+    accuracyPassport: result.accuracyPassport,
     rawSamples: result.samples,
+    rawEvidence: result.rawEvidence,
   };
 }
 
@@ -90,13 +99,36 @@ export function downloadJson(result: TestResult, verdict: Verdict | null) {
 
 /** Flatten a result to a single CSV row of the headline metrics. */
 export function resultCsvRows(result: TestResult, verdict: Verdict | null): Record<string, string | number>[] {
+  const download = result.publication.download.valueMbps;
+  const upload = result.publication.upload.valueMbps;
+  const capacityDownload = result.capacity.download.publication;
+  const capacityUpload = result.capacity.upload.publication;
   return [
     {
       timestamp: new Date(result.timestamp).toISOString(),
+      run_id: result.runId,
+      engine_version: result.engineVersion,
       health_score: verdict?.score ?? "",
       confidence: result.confidence.score,
-      download_mbps: result.downloadMbps.toFixed(1),
-      upload_mbps: result.uploadMbps.toFixed(1),
+      download_mbps: formatNullable(download),
+      download_maximum_capacity_mbps: formatNullable(capacityDownload.maximum.valueMbps),
+      download_reliable_mbps: formatNullable(capacityDownload.reliable.valueMbps),
+      download_single_stream_mbps: formatNullable(capacityDownload.singleStream.valueMbps),
+      download_p90_window_mbps: percentile(result.download.multi.samples, 90).toFixed(1),
+      download_p5_window_mbps: result.download.multi.p5Mbps.toFixed(1),
+      download_p95_window_mbps: result.download.multi.p95Mbps.toFixed(1),
+      download_median_window_mbps: result.download.multi.medianMbps.toFixed(1),
+      download_peak_window_mbps: result.download.multi.peakMbps.toFixed(1),
+      download_variation_pct: result.download.multi.variationPct.toFixed(1),
+      upload_mbps: formatNullable(upload),
+      upload_maximum_capacity_mbps: formatNullable(capacityUpload.maximum.valueMbps),
+      upload_reliable_mbps: formatNullable(capacityUpload.reliable.valueMbps),
+      upload_single_stream_mbps: formatNullable(capacityUpload.singleStream.valueMbps),
+      upload_median_observation_mbps: result.upload.medianMbps.toFixed(1),
+      upload_peak_observation_mbps: result.upload.peakMbps.toFixed(1),
+      upload_variation_pct: result.upload.variationPct.toFixed(1),
+      download_streams: result.download.multi.streams,
+      upload_streams: result.upload.streams,
       idle_latency_ms: Math.round(result.idlePingMs),
       loaded_down_ms: Math.round(result.loadedDownPingMs),
       loaded_up_ms: Math.round(result.loadedUpPingMs),
@@ -110,6 +142,12 @@ export function resultCsvRows(result: TestResult, verdict: Verdict | null): Reco
       server: `${result.server.chosen.provider}${result.server.chosen.edgeCode ? ` ${result.server.chosen.edgeCode}` : ""}`.trim(),
       data_mb: Math.round(result.dataUsedMB),
       duration_s: (result.durationMs / 1000).toFixed(1),
+      download_stop_reason: result.download.multi.stopReason,
+      upload_stop_reason: result.upload.stopReason,
+      download_request_bytes: result.download.multi.requestBytes,
+      upload_request_bytes: result.upload.requestBytes,
+      stream_diagnostic_count: result.rawEvidence.streamDiagnostics.length,
+      warmup_payload_bytes: result.download.single.warmupBytes + result.download.multi.warmupBytes + result.upload.warmupBytes,
     },
   ];
 }
@@ -122,15 +160,20 @@ export function downloadCsvResult(result: TestResult, verdict: Verdict | null) {
 export function buildShareReport(result: TestResult, verdict: Verdict | null): string {
   const r = result;
   const L = (n: number, d = 0) => n.toFixed(d);
+  const publishedDownload = r.publication.download.valueMbps;
+  const publishedUpload = r.publication.upload.valueMbps;
   return [
     `# NetPulse report`,
     ``,
     `**Overall health:** ${verdict?.score ?? "—"}/100 — ${verdict?.headline ?? ""}`,
     `**Result confidence:** ${r.confidence.score}% (${r.confidence.summary})`,
+    ...r.publication.labels.map((label) => `**${label}**`),
+    `**Publication outcome:** ${r.publication.outcome}`,
+    `**Accuracy certification:** Not accuracy-certified`,
     ``,
     `## Metrics`,
-    `- Download: **${L(r.downloadMbps, 1)} Mbps**  (single ${L(r.download.single.mbps, 1)} / multi ${L(r.download.multi.mbps, 1)})`,
-    `- Upload: **${L(r.uploadMbps, 1)} Mbps**  (peak ${L(r.upload.peakMbps, 1)})`,
+    `- Download: **${publishedDownload === null ? "measurement inconclusive" : `${L(publishedDownload, 1)} Mbps`}**`,
+    `- Upload: **${publishedUpload === null ? "measurement inconclusive" : `${L(publishedUpload, 1)} Mbps`}**`,
     `- Idle latency: **${L(r.idlePingMs)} ms**  (p95 ${L(r.idleLatency.p95)}, jitter ${L(r.idleJitterMs, 1)})`,
     `- Loaded latency: down ${L(r.loadedDownPingMs)} ms / up ${L(r.loadedUpPingMs)} ms`,
     `- Bufferbloat: **${r.bufferbloatGrade}** (+${L(r.bufferbloatMs)} ms; down ${r.bufferbloat.downloadGrade} / up ${r.bufferbloat.uploadGrade})`,
@@ -144,6 +187,10 @@ export function buildShareReport(result: TestResult, verdict: Verdict | null): s
     `## Diagnosis`,
     ...(verdict?.bad.length ? verdict.bad.map((b) => `- ⚠ ${b}`) : ["- No major problems found."]),
     ``,
-    `_Measured with NetPulse against Cloudflare's anycast endpoint. Public IP omitted for privacy. Results reflect the path to the nearest Cloudflare edge and differ from other speed tests by design._`,
+    `_This test uses one Cloudflare anycast measurement origin. Independent endpoint verification is not yet available. Routing and endpoint conditions can influence results. Public IP omitted for privacy._`,
   ].join("\n");
+}
+
+function formatNullable(value: number | null): string {
+  return value === null ? "" : value.toFixed(1);
 }

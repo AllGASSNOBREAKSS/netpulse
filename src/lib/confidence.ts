@@ -4,7 +4,13 @@
  * reason is surfaced in the UI so the score is explainable.
  */
 import { coefficientOfVariation } from "./stats";
-import type { Confidence, ConfidenceReason } from "./types";
+import type {
+  Confidence,
+  ConfidenceReason,
+  SecondaryVerification,
+  ThroughputPublicationStatus,
+  UploadReceiptStatus,
+} from "./types";
 
 export type ConfidenceInputs = {
   downloadSamples: number[];
@@ -15,10 +21,25 @@ export type ConfidenceInputs = {
   loadedUpProbeCount: number;
   serverAvailable: boolean;
   serverJitterMs: number;
+  downloadWarmupSucceeded: boolean;
+  uploadWarmupSucceeded: boolean;
+  downloadMinimumDurationMet: boolean;
+  uploadMinimumDurationMet: boolean;
   tabForegroundThroughout: boolean;
   completed: boolean;
   errors: number;
   earlyStopped: boolean;
+  endpointHealth?: "healthy" | "degraded" | "draining" | "unavailable" | "unknown";
+  endpointLoadPct?: number | null;
+  backupEndpointCount?: number;
+  clientLimited?: boolean;
+  secondaryVerification?: SecondaryVerification;
+  profileMode?: "full" | "lowData" | "quick";
+  downloadPublication?: ThroughputPublicationStatus;
+  uploadPublication?: ThroughputPublicationStatus;
+  uploadReceiptStatus?: UploadReceiptStatus;
+  semanticConsistency?: boolean;
+  phaseRetryCount?: number;
 };
 
 export function computeConfidence(i: ConfidenceInputs): Confidence {
@@ -35,7 +56,21 @@ export function computeConfidence(i: ConfidenceInputs): Confidence {
   add("Download sampling", dlCount >= 12, `${dlCount} streamed throughput windows`, dlCount >= 8 ? 6 : 16);
 
   const ulCount = i.uploadSamples.length;
-  add("Upload sampling", ulCount >= 3, `${ulCount} accepted-payload observations`, ulCount > 0 ? 6 : 18);
+  add("Upload sampling", ulCount >= 3, `${ulCount} successfully submitted payload observations`, ulCount > 0 ? 6 : 18);
+
+  const uploadCov = coefficientOfVariation(i.uploadSamples.slice(Math.floor(ulCount / 2)));
+  if (ulCount < 2) {
+    add("Upload consistency", false, "Too few successfully submitted payload observations to assess variation", 8);
+  } else if (uploadCov < 0.15) {
+    add("Upload consistency", true, `Successfully submitted payload observations were steady (CoV ${uploadCov.toFixed(2)})`);
+  } else {
+    add(
+      "Upload consistency",
+      false,
+      `Successfully submitted payload observations varied (CoV ${uploadCov.toFixed(2)})`,
+      uploadCov < 0.3 ? 5 : 10,
+    );
+  }
 
   add(
     "Idle latency sampling",
@@ -77,6 +112,31 @@ export function computeConfidence(i: ConfidenceInputs): Confidence {
     );
   }
 
+  add(
+    "Download warm-up",
+    i.downloadWarmupSucceeded,
+    i.downloadWarmupSucceeded ? "Connection warmed before timed download" : "Download warm-up failed; fixed request sizing was used",
+    4,
+  );
+  add(
+    "Upload warm-up",
+    i.uploadWarmupSucceeded,
+    i.uploadWarmupSucceeded ? "Connection warmed before timed upload" : "Upload warm-up failed; fixed request sizing was used",
+    4,
+  );
+  add(
+    "Download duration",
+    i.downloadMinimumDurationMet,
+    i.downloadMinimumDurationMet ? "Minimum timed download duration completed" : "Payload cap ended download before its minimum duration",
+    6,
+  );
+  add(
+    "Upload duration",
+    i.uploadMinimumDurationMet,
+    i.uploadMinimumDurationMet ? "Minimum timed upload duration completed" : "Payload cap ended upload before its minimum duration",
+    6,
+  );
+
   if (i.tabForegroundThroughout) add("Tab visibility", true, "Foreground for the whole test");
   else {
     add("Tab visibility", false, "Tab was backgrounded — browsers throttle timers, results may be low", 20);
@@ -95,6 +155,103 @@ export function computeConfidence(i: ConfidenceInputs): Confidence {
 
   if (i.earlyStopped)
     add("Early stop", true, "Stopped early because samples were already steady");
+
+  if (i.endpointHealth !== undefined) {
+    add(
+      "Endpoint health",
+      i.endpointHealth === "healthy",
+      i.endpointHealth === "healthy" ? "Endpoint reported healthy" : `Endpoint health was ${i.endpointHealth}`,
+      i.endpointHealth === "unknown" ? 4 : i.endpointHealth === "degraded" ? 8 : 12,
+    );
+  }
+  if (i.endpointLoadPct !== undefined) {
+    const endpointLoadPct = i.endpointLoadPct;
+    const known = endpointLoadPct !== null;
+    const healthyLoad = endpointLoadPct !== null && endpointLoadPct < 85;
+    add(
+      "Endpoint load",
+      healthyLoad,
+      endpointLoadPct !== null ? `${Math.round(endpointLoadPct)}% reported endpoint load` : "Endpoint load telemetry unavailable",
+      known ? 10 : 3,
+    );
+  }
+  if (i.backupEndpointCount !== undefined) {
+    add(
+      "Independent endpoint",
+      i.backupEndpointCount > 0,
+      i.backupEndpointCount > 0 ? `${i.backupEndpointCount} compatible backup endpoint(s) passed probing` : "No independent backup endpoint was reachable",
+      4,
+    );
+  }
+  if (i.secondaryVerification !== undefined) {
+    const verification = i.secondaryVerification;
+    if (verification.status === "agree") {
+      add("Secondary throughput", true, `Independent endpoint agreed within ${verification.differencePct?.toFixed(1)}%`);
+    } else if (verification.status === "disagree") {
+      add("Secondary throughput", false, `Independent endpoint differed by ${verification.differencePct?.toFixed(1)}%`, 12);
+    } else {
+      add("Secondary throughput", false, verification.reason, 0);
+    }
+  }
+  if (i.clientLimited !== undefined) {
+    add(
+      "Client calibration",
+      !i.clientLimited,
+      i.clientLimited ? "This browser or device may be limiting measured throughput" : "No client-side calibration warning was detected",
+      12,
+    );
+  }
+
+  for (const [label, status] of [
+    ["Download qualification", i.downloadPublication],
+    ["Upload qualification", i.uploadPublication],
+  ] as const) {
+    if (status === undefined || status === "measured") continue;
+    add(
+      label,
+      false,
+      status === "quick-estimate" ? "Evidence supports only a quick estimate" : "Headline throughput evidence was inconclusive",
+      status === "quick-estimate" ? 10 : 24,
+    );
+  }
+  if (i.uploadReceiptStatus !== undefined) {
+    const status = i.uploadReceiptStatus;
+    add(
+      "Upload receipt",
+      status === "verified",
+      status === "verified"
+        ? "Versioned server receipt matched the request"
+        : status === "partial"
+          ? "Server byte receipt matched, but complete receipt identity was unavailable"
+          : `Upload receipt evidence was ${status}`,
+      status === "partial" ? 4 : status === "missing" ? 12 : 25,
+    );
+  }
+  if (i.semanticConsistency !== undefined) {
+    add(
+      "Metric semantics",
+      i.semanticConsistency,
+      i.semanticConsistency
+        ? "Maximum, reliable, and single-stream products were semantically consistent"
+        : "At least one throughput invariant remained unresolved",
+      25,
+    );
+  }
+  if (i.phaseRetryCount !== undefined && i.phaseRetryCount > 0) {
+    add("Phase retry", false, `${i.phaseRetryCount} measurement phase retry attempt(s) were required`, Math.min(12, i.phaseRetryCount * 6));
+  }
+
+  const profileCeiling = i.profileMode === "quick" ? 55 : i.profileMode === "lowData" ? 65 : 100;
+  if (score > profileCeiling) {
+    const reduction = score - profileCeiling;
+    score = profileCeiling;
+    reasons.push({
+      label: "Profile confidence ceiling",
+      ok: false,
+      detail: `${i.profileMode === "quick" ? "Quick" : "Low-data"} mode is capped at ${profileCeiling}% confidence`,
+      penalty: reduction,
+    });
+  }
 
   score = Math.max(0, Math.min(100, Math.round(score)));
   const good = reasons.filter((r) => r.ok).map((r) => r.label.toLowerCase());

@@ -1,47 +1,40 @@
-import { lazy, Suspense, useCallback, useRef, useState } from "react";
-import { ArrowRight, Play, Share2 } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { ArrowRight, Play, Share2, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { PageHeader, Section, StatGrid } from "@/components/np/Layout";
 import { AppHeader } from "@/components/AppHeader";
 import { AppSidebar } from "@/components/AppSidebar";
 import { NpFooter } from "@/components/Footer";
 import { Gauge } from "@/components/Gauge";
-import { ConnectionPrivacy, LatencyMonitor } from "@/components/Panels";
+import { ConnectionPrivacy } from "@/components/Panels";
 import { MetricDetail, ScoreDetail } from "@/components/MetricDetail";
 import { MethodologyModal, PreflightServer } from "@/components/Report";
 import { FixMyInternet } from "@/components/FixMyInternet";
-import type { HistoryEntry } from "@/pages/HistoryPage";
+import { loadHistory, saveHistory, type HistoryEntry } from "@/lib/history";
+import { clearRawEvidence, deleteRawEvidence, saveRawEvidence } from "@/lib/evidenceStore";
+import { useGaugeMotion } from "@/hooks/use-gauge-motion";
+import { listServerOptions, type ServerOption } from "@/lib/servers";
+import { isCancellation } from "@/lib/cancellation";
+import type { MeasurementEvent } from "@/lib/measurementPipeline";
 
 // Chart-heavy pages load on demand so recharts stays out of the main bundle.
 const ResultsPage = lazy(() => import("@/pages/Results").then((m) => ({ default: m.ResultsPage })));
 const HistoryPage = lazy(() => import("@/pages/HistoryPage").then((m) => ({ default: m.HistoryPage })));
+const LiveMeasurementCharts = lazy(() => import("@/components/ResultCharts").then((m) => ({ default: m.LiveMeasurementCharts })));
+const ConnectionBlackBox = lazy(() => import("@/components/ConnectionBlackBox").then((m) => ({ default: m.ConnectionBlackBox })));
+const AreaPulse = lazy(() => import("@/components/AreaPulse").then((m) => ({ default: m.AreaPulse })));
+const PlanRealityCheck = lazy(() => import("@/components/PlanRealityCheck").then((m) => ({ default: m.PlanRealityCheck })));
 import { ConnectionDetailsPage } from "@/pages/ConnectionDetails";
 import { CalculatorPage, FaqPage, GuidesPage } from "@/pages/Learn";
 import { UpcomingPage } from "@/pages/Upcoming";
-import { runTest, type Phase, type TestResult } from "@/lib/engine";
+import { runTest, type Phase, type Sample, type TestResult } from "@/lib/engine";
 import { buildShareReport } from "@/lib/export";
 import { METRICS } from "@/lib/metrics";
 import type { Preflight, ServerSelection } from "@/lib/types";
 import type { View } from "@/lib/views";
 import { judge, type Verdict } from "@/lib/verdict";
-
-const HISTORY_KEY = "netpulse_history";
-
-function loadHistory(): HistoryEntry[] {
-  try {
-    return JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "[]");
-  } catch {
-    return [];
-  }
-}
-function saveHistory(entries: HistoryEntry[]) {
-  try {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(entries.slice(0, 100)));
-  } catch {
-    /* localStorage unavailable */
-  }
-}
 
 const PHASE_LABEL: Record<Phase, string> = {
   idle: "Ready when you are",
@@ -53,8 +46,28 @@ const PHASE_LABEL: Record<Phase, string> = {
   upload: "Measuring upload",
   packetloss: "Analysis — UDP reachability",
   done: "Test complete",
+  cancelled: "Test cancelled — incomplete measurements were discarded",
   error: "Test failed — check your connection and retry",
 };
+
+function samplesFromEvents(events: MeasurementEvent[]): Sample[] {
+  return events.flatMap((event) => {
+    const mbps = typeof event.data.mbps === "number" ? event.data.mbps : undefined;
+    const rttMs = typeof event.data.rttMs === "number" ? event.data.rttMs : undefined;
+    if (mbps === undefined && rttMs === undefined) return [];
+    const streamMode = event.data.streamMode === "single" || event.data.streamMode === "multi"
+      ? event.data.streamMode
+      : undefined;
+    const phase: Phase = event.phase === "measuring-idle-latency"
+      ? "latency"
+      : event.phase === "measuring-upload" || event.phase === "measuring-upload-loaded-latency"
+        ? "upload"
+        : streamMode === "single"
+          ? "download_single"
+          : "download_multi";
+    return [{ t: event.elapsedMs, phase, mbps, rttMs, streamMode }];
+  });
+}
 
 export default function App() {
   const [view, setView] = useState<View>("speed");
@@ -65,15 +78,41 @@ export default function App() {
   const [lowData, setLowData] = useState(false);
   const [liveDown, setLiveDown] = useState<number | null>(null);
   const [liveUp, setLiveUp] = useState<number | null>(null);
+  const [liveSamples, setLiveSamples] = useState<Sample[]>([]);
   const [openMetric, setOpenMetric] = useState<string | null>(null);
   const [showScore, setShowScore] = useState(false);
   const [showMethod, setShowMethod] = useState(false);
   const [reportCopied, setReportCopied] = useState(false);
   const [preflight, setPreflight] = useState<Preflight | null>(null);
   const [server, setServer] = useState<ServerSelection | null>(null);
+  const [serverPreference, setServerPreference] = useState("auto");
+  const [serverOptions, setServerOptions] = useState<ServerOption[]>([]);
+  const [serverDirectoryError, setServerDirectoryError] = useState<string | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
   const runningRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
 
-  const running = phase !== "idle" && phase !== "done" && phase !== "error";
+  useEffect(() => {
+    let current = true;
+    void listServerOptions()
+      .then((options) => {
+        if (!current) return;
+        setServerOptions(options);
+        setServerDirectoryError(null);
+      })
+      .catch((error: unknown) => {
+        if (!current) return;
+        setServerOptions([]);
+        setServerDirectoryError(error instanceof Error ? error.message : "Endpoint directory unavailable.");
+      });
+    return () => {
+      current = false;
+    };
+  }, []);
+
+  useEffect(() => () => abortRef.current?.abort(), []);
+
+  const running = phase !== "idle" && phase !== "done" && phase !== "cancelled" && phase !== "error";
 
   const copyReport = useCallback(async () => {
     if (!result) return;
@@ -93,54 +132,101 @@ export default function App() {
     setVerdict(null);
     setLiveDown(null);
     setLiveUp(null);
+    setLiveSamples([]);
     setPreflight(null);
     setServer(null);
+    setRunError(null);
     setView("speed");
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       const r = await runTest(
-        { lowData },
+        {
+          lowData,
+          serverId: serverPreference === "auto" ? undefined : serverPreference,
+          signal: controller.signal,
+        },
         {
           onPhase: setPhase,
           onPreflight: setPreflight,
           onServer: setServer,
-          onSample: (s) => {
-            if (s.mbps === undefined) return;
-            if (s.phase === "upload") setLiveUp(s.mbps);
-            else setLiveDown(s.mbps);
+          onEvents: (events) => {
+            const batch = samplesFromEvents(events);
+            if (batch.length === 0) return;
+            setLiveSamples((samples) => [...samples, ...batch].slice(-240));
+            const latestDownload = [...batch].reverse().find((sample) => sample.mbps !== undefined && sample.phase !== "upload");
+            const latestUpload = [...batch].reverse().find((sample) => sample.mbps !== undefined && sample.phase === "upload");
+            if (latestDownload?.mbps !== undefined) setLiveDown(latestDownload.mbps);
+            if (latestUpload?.mbps !== undefined) setLiveUp(latestUpload.mbps);
           },
         },
       );
+      if (import.meta.env.DEV && import.meta.env.VITE_NETPULSE_LAB_MODE === "true") {
+        window.__NETPULSE_LAB_RESULT__ = r;
+      }
       setResult(r);
+      void saveRawEvidence(r).catch((error: unknown) => {
+        console.warn("NetPulse could not save raw measurement evidence locally.", error);
+      });
       const v = judge(r);
       setVerdict(v);
-      const entry: HistoryEntry = {
-        ts: r.timestamp,
-        down: r.downloadMbps,
-        up: r.uploadMbps,
-        ping: r.idlePingMs,
-        bloat: r.bufferbloatMs,
-        grade: r.bufferbloatGrade,
-        score: v.score,
-        dataMB: r.dataUsedMB,
-        isp: r.ispLocation.ispHint ?? undefined,
-        server: `${r.server.chosen.provider}${r.server.chosen.edgeCode ? ` ${r.server.chosen.edgeCode}` : ""}`.trim(),
-        confidence: r.confidence.score,
-      };
-      setHistory((prev) => {
-        const next = [entry, ...prev];
-        saveHistory(next);
-        return next;
-      });
-    } catch {
-      setPhase("error");
+      const publishedDown = r.publication.download.valueMbps;
+      const publishedUp = r.publication.upload.valueMbps;
+      if (publishedDown !== null && publishedUp !== null) {
+        const entry: HistoryEntry = {
+          runId: r.runId,
+          ts: r.timestamp,
+          down: publishedDown,
+          up: publishedUp,
+          ping: r.idlePingMs,
+          bloat: r.bufferbloatMs,
+          grade: r.bufferbloatGrade,
+          score: v.score,
+          dataMB: r.dataUsedMB,
+          isp: r.ispLocation.ispHint ?? undefined,
+          server: `${r.server.chosen.provider}${r.server.chosen.edgeCode ? ` ${r.server.chosen.edgeCode}` : ""}`.trim(),
+          confidence: r.confidence.score,
+          loadedDownMs: r.loadedDownPingMs,
+          loadedUpMs: r.loadedUpPingMs,
+          jitterMs: r.idleJitterMs,
+          stabilityScore: r.stability.score,
+          durationMs: r.durationMs,
+          connectionMedium: "unknown",
+          timezoneOffsetMinutes: new Date(r.timestamp).getTimezoneOffset(),
+        };
+        setHistory((prev) => {
+          const next = [entry, ...prev];
+          saveHistory(next);
+          return next;
+        });
+      }
+    } catch (error) {
+      if (isCancellation(error)) {
+        setLiveDown(null);
+        setLiveUp(null);
+        setLiveSamples([]);
+        setPhase("cancelled");
+      } else {
+        setRunError(error instanceof Error ? error.message : "The measurement could not complete.");
+        setPhase("error");
+      }
     } finally {
+      if (abortRef.current === controller) abortRef.current = null;
       runningRef.current = false;
     }
-  }, [lowData]);
+  }, [lowData, serverPreference]);
+
+  const cancel = useCallback(() => abortRef.current?.abort(), []);
 
   const openDef = openMetric ? METRICS.find((m) => m.id === openMetric) : null;
   const isDownloadPhase = phase === "download_single" || phase === "download_multi";
   const isUploadPhase = phase === "upload";
+  const publishedDownload = result?.publication.download.valueMbps ?? null;
+  const publishedUpload = result?.publication.upload.valueMbps ?? null;
+  const gaugeValues = useGaugeMotion({
+    download: phase === "done" && result ? publishedDownload ?? 0 : liveDown ?? 0,
+    upload: phase === "done" && result ? publishedUpload ?? 0 : liveUp ?? 0,
+  });
 
   /* ---- Speed Test page ---- */
   const fmtMbps = (n: number) => (n >= 100 ? String(Math.round(n)) : n.toFixed(1));
@@ -159,23 +245,23 @@ export default function App() {
       />
 
       {/* The measurement stage: one surface, twin gauges, one primary action. */}
-      <section className="rounded-2xl border border-border bg-card px-4 py-8 sm:px-10 sm:py-10">
-        <div className="mx-auto grid max-w-2xl grid-cols-1 gap-10 sm:grid-cols-2 sm:gap-6">
+      <section className="px-0 py-4 sm:py-6">
+        <div className="mx-auto grid max-w-4xl grid-cols-1 gap-10 sm:grid-cols-2 sm:gap-8">
           <Gauge
             label="Download"
-            liveMbps={liveDown}
+            valueMbps={gaugeValues.download}
             active={isDownloadPhase}
-            waiting={running && !isDownloadPhase && !isUploadPhase}
             done={phase === "done"}
-            finalMbps={result?.downloadMbps ?? null}
+            hasMeasured={liveDown !== null || (phase === "done" && result !== null)}
+            finalMbps={publishedDownload}
           />
           <Gauge
             label="Upload"
-            liveMbps={liveUp}
+            valueMbps={gaugeValues.upload}
             active={isUploadPhase}
-            waiting={running && !isUploadPhase}
             done={phase === "done"}
-            finalMbps={result?.uploadMbps ?? null}
+            hasMeasured={liveUp !== null || (phase === "done" && result !== null)}
+            finalMbps={publishedUpload}
           />
         </div>
 
@@ -188,6 +274,14 @@ export default function App() {
             {running && <span className="pulse-dot" aria-hidden="true" />}
             {PHASE_LABEL[phase]}
           </p>
+          {result && phase === "done" && (
+            <div className="space-y-1 text-center text-[12px] leading-relaxed text-muted-foreground" role="note">
+              {result.publication.labels.map((label) => (
+                <p key={label} className="font-medium text-status-warn">{label}</p>
+              ))}
+              <p>Not accuracy-certified.</p>
+            </div>
+          )}
 
           <div className="flex flex-wrap items-center justify-center gap-2.5">
             <Button
@@ -199,6 +293,11 @@ export default function App() {
               <Play className="size-4" />
               {running ? "Testing…" : result ? "Run Again" : "Start Test"}
             </Button>
+            {running && (
+              <Button size="lg" variant="outline" onClick={cancel} className="h-11 gap-2 px-6 text-[14px]">
+                <Square className="size-3.5" aria-hidden="true" /> Cancel
+              </Button>
+            )}
             {result && (
               <Button
                 size="lg"
@@ -210,8 +309,38 @@ export default function App() {
               </Button>
             )}
           </div>
+          {runError && (
+            <p className="max-w-md text-center text-[12.5px] text-destructive" role="alert">
+              {runError}
+            </p>
+          )}
+          <div className="flex max-w-sm flex-col items-center gap-2 text-center">
+            <label htmlFor="speed-server-preference" className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+              Advanced test region
+            </label>
+            <Select value={serverPreference} onValueChange={setServerPreference} disabled={running || serverOptions.length === 0}>
+              <SelectTrigger id="speed-server-preference" className="w-[min(22rem,82vw)]" aria-label="Choose a measurement server or automatic selection">
+                <SelectValue placeholder="Automatic selection" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">Automatic — health and route aware</SelectItem>
+                {serverOptions.map((option) => (
+                  <SelectItem key={option.id} value={option.id}>{option.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
+              {serverDirectoryError ?? "Only real endpoints advertised by the versioned directory are listed. Planned regions are not selectable."}
+            </p>
+          </div>
         </div>
       </section>
+
+      {running && liveSamples.length > 0 && (
+        <Suspense fallback={<div className="h-56 animate-pulse rounded-2xl border border-border bg-card" />}>
+          <LiveMeasurementCharts samples={liveSamples} />
+        </Suspense>
+      )}
 
       {/* Internet Health — the headline verdict, not a metric among metrics. */}
       {verdict && result && phase === "done" && (
@@ -239,7 +368,13 @@ export default function App() {
         </button>
       )}
 
-      {(preflight || server) && !result && <PreflightServer preflight={preflight} server={server} preOnly />}
+      {(preflight || server || result) && (
+        <PreflightServer
+          preflight={result?.preflight ?? preflight}
+          server={result?.server ?? server}
+          preOnly={!result}
+        />
+      )}
 
       {result && (
         <>
@@ -250,8 +385,8 @@ export default function App() {
             <StatGrid
               columns={4}
               stats={[
-                { label: "Download", value: `${fmtMbps(result.downloadMbps)} Mbps` },
-                { label: "Upload", value: `${fmtMbps(result.uploadMbps)} Mbps` },
+                { label: "Download", value: publishedDownload === null ? "Measurement inconclusive" : `${fmtMbps(publishedDownload)} Mbps` },
+                { label: "Upload", value: publishedUpload === null ? "Measurement inconclusive" : `${fmtMbps(publishedUpload)} Mbps` },
                 { label: "Idle latency", value: `${Math.round(result.idlePingMs)} ms` },
                 {
                   label: "Bufferbloat",
@@ -268,6 +403,9 @@ export default function App() {
                 },
               ]}
             />
+            <p className="mt-4 text-[12px] leading-relaxed text-muted-foreground" role="note">
+              {result.publication.disclosures.join(" ")}
+            </p>
             <p className="text-[12.5px] leading-relaxed text-muted-foreground">
               Location is derived from your IP's routing region — it describes the network, not your
               address. The IP is masked here and is never included in exports or shared reports.
@@ -313,16 +451,25 @@ export default function App() {
             />
           )}
           {view === "fixit" && <FixMyInternet />}
-          {view === "blackbox" && <LatencyMonitor />}
+          {view === "blackbox" && <ConnectionBlackBox />}
           {view === "history" && (
             <HistoryPage
               history={history}
               onClear={() => {
                 setHistory([]);
                 saveHistory([]);
+                void clearRawEvidence().catch((error: unknown) => {
+                  console.warn("NetPulse could not clear local raw evidence.", error);
+                });
               }}
               onDelete={(ts) => {
                 setHistory((prev) => {
+                  const runId = prev.find((entry) => entry.ts === ts)?.runId;
+                  if (runId) {
+                    void deleteRawEvidence(runId).catch((error: unknown) => {
+                      console.warn("NetPulse could not delete local raw evidence.", error);
+                    });
+                  }
                   const next = prev.filter((h) => h.ts !== ts);
                   saveHistory(next);
                   return next;
@@ -335,7 +482,17 @@ export default function App() {
           {view === "calculator" && <CalculatorPage />}
           {view === "guides" && <GuidesPage />}
           {view === "faq" && <FaqPage />}
-          {(view === "areapulse" || view === "planreality" || view === "reports") && (
+          {view === "areapulse" && <AreaPulse result={result} />}
+          {view === "planreality" && (
+            <PlanRealityCheck
+              history={history}
+              onHistoryChange={(next) => {
+                setHistory(next);
+                saveHistory(next);
+              }}
+            />
+          )}
+          {view === "reports" && (
             <UpcomingPage page={view} onNavigate={setView} />
           )}
           </Suspense>

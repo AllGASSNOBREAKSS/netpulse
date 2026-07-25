@@ -23,6 +23,16 @@ export function median(xs: number[]): number {
   return percentile(xs, 50);
 }
 
+/** Mean of samples from the 25th through 75th percentile (inclusive). */
+export function interquartileMean(xs: number[]): number {
+  if (xs.length === 0) return 0;
+  const sorted = [...xs].sort((a, b) => a - b);
+  const low = percentile(sorted, 25);
+  const high = percentile(sorted, 75);
+  const middle = sorted.filter((value) => value >= low && value <= high);
+  return mean(middle.length ? middle : sorted);
+}
+
 /**
  * Percentile with linear interpolation between closest ranks.
  * `p` is 0–100. percentile(xs, 95) == P95.
@@ -68,6 +78,8 @@ export type Summary = {
   min: number;
   median: number;
   mean: number;
+  interquartileMean: number;
+  p90: number;
   p95: number;
   p99: number;
   jitter: number;
@@ -81,6 +93,8 @@ export function summarize(xs: number[]): Summary {
     min: min(xs),
     median: median(xs),
     mean: mean(xs),
+    interquartileMean: interquartileMean(xs),
+    p90: percentile(xs, 90),
     p95: percentile(xs, 95),
     p99: percentile(xs, 99),
     jitter: jitter(xs),

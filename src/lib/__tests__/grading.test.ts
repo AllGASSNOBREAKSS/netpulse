@@ -58,4 +58,13 @@ describe("stability score", () => {
     expect(unstableUpload.throughputCov).toBe(0.4);
     expect(unstableUpload.score).toBeLessThan(stableBoth.score);
   });
+
+  it("penalizes failed loaded probes and reports completeness", () => {
+    const loaded = Array.from({ length: 8 }, () => 25);
+    const complete = computeStability(20, loaded, 0.02, 0.02, 0);
+    const failures = computeStability(20, loaded, 0.02, 0.02, 4);
+    expect(failures.score).toBeLessThan(complete.score);
+    expect(failures.failedProbes).toBe(4);
+    expect(failures.completeness).toBeCloseTo(8 / 12, 3);
+  });
 });

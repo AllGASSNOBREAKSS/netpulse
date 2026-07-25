@@ -9,7 +9,7 @@
  *   - deep black main workspace, charcoal sidebar / elevated surfaces
  *   - white + muted-gray typography, minimal borders
  *   - one controlled electric-blue accent (never a section background)
- *   - Geist / Geist Mono (loaded via index.html; font loading is the app's job)
+ *   - bundled Geist body copy and Space Grotesk display typography
  *
  * Token values are [light, dark] tuples, which defineTheme compiles to CSS
  * light-dark(), so both modes come from a single source of truth.
@@ -61,9 +61,9 @@ export const netpulseTheme = defineTheme({
 
   typography: {
     scale: { base: 15, ratio: 1.2 },
-    body: { family: "Geist", fallbacks: "system-ui, -apple-system, sans-serif" },
-    heading: { family: "Geist", fallbacks: "system-ui, sans-serif", weight: "semibold" },
-    code: { family: "Geist Mono", fallbacks: 'ui-monospace, "SF Mono", monospace' },
+    body: { family: "Geist Variable", fallbacks: "system-ui, -apple-system, sans-serif" },
+    heading: { family: "Space Grotesk Variable", fallbacks: '"Geist Variable", system-ui, sans-serif', weight: "semibold" },
+    code: { family: "SFMono-Regular", fallbacks: 'Consolas, "Liberation Mono", monospace' },
   },
 
   radius: { base: 4, multiplier: 1.15 },

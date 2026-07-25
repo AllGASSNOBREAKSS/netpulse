@@ -1,0 +1,75 @@
+# NetPulse accuracy and trust model
+
+NetPulse reports what its browser engine observed; it does not promise parity with another speed-test provider or claim worldwide accuracy without controlled evidence. The implemented formulas are specified in [METHODOLOGY.md](METHODOLOGY.md), and executed or blocked validation is recorded in [VALIDATION_REPORT.md](VALIDATION_REPORT.md).
+
+The normative measurement contract is
+[NETPULSE_MEASUREMENT_SPEC.md](NETPULSE_MEASUREMENT_SPEC.md). The complete
+per-metric source/reliability review is
+[MEASUREMENT_DEFECT_AUDIT.md](MEASUREMENT_DEFECT_AUDIT.md). Proposed
+certification gates are in
+[ACCURACY_CERTIFICATION_PLAN.md](ACCURACY_CERTIFICATION_PLAN.md); none of those
+gates has passed merely because the documents or lab scaffolding exist.
+
+## What is directly observed
+
+- Download application bytes delivered to JavaScript and monotonic phase time.
+- Upload application payload associated with successful HTTP POST responses,
+  server-received byte receipts when exposed, per-request browser duration, and
+  optional server receive duration. Cloudflare receipt identity remains
+  partial, not cryptographic proof.
+- Sequential HTTPS request timings for idle, download-loaded, and upload-loaded latency.
+- Family-specific IPv4/IPv6 HTTPS timings and browser/server transport facts when explicitly exposed.
+- Fixed-window download throughput, per-receipt upload throughput
+  observations, failures, stop reasons, stream counts, phase timings, tab
+  visibility, client-calibration facts, and endpoint probes.
+- Documented endpoint metadata and privacy-filtered trace fields when the source returns them.
+
+Unavailable values are omitted or labeled unavailable. In particular, the current public engine does not report a packet-loss percentage, exact location, Wi-Fi signal, router telemetry, or a silently substituted third-party measurement.
+
+## Derived results
+
+- Headline download and upload are counted application bits divided by actual measured phase time.
+- Consumer latency is the median of successful samples; minimum, mean, interquartile mean, P90, P95, P99, standard deviation, failures, and count remain available as evidence.
+- Jitter is the mean absolute difference between consecutive successful latency samples.
+- Directional bufferbloat is `max(0, loaded median - idle median)` for download and upload separately.
+- Stability and Internet Health are transparent product calculations with their factors and weights exposed; neither is a standardized network metric.
+- Historical comparison uses a personal median and median absolute deviation after enough local history, then requires three of the latest five degraded results before confirming an alert. ISP comparison requires at least three locally recorded tests under the exact same ISP label.
+
+## Confidence and the Accuracy Passport
+
+Confidence starts at 100, subtracts only evidence-backed penalties, and is
+clamped to 0–100. Current factors include sample count and variation, idle and
+loaded-latency coverage, endpoint health/load, minimum-duration completion,
+tab visibility, request/probe errors, upload receipt completeness, stage
+qualification, semantic consistency, phase retries, backup availability, and
+client-calibration warnings. Low-data mode is capped at 65%; quick mode is
+capped at 55%. Every applied deduction is returned as a visible reason.
+
+Each completed result receives an Accuracy Passport containing its run ID, engine and methodology versions, sample and failure counts, endpoint selection, backup verification status, endpoint health/load, stream counts, transferred data, duration, IP-family comparison, transport telemetry, browser state, phase retries, limitations, and confidence reasons. A bounded secondary download records agreement or disagreement but never replaces or averages the primary result.
+
+The future-compatible evidence contract is documented in
+[ACCURACY_PASSPORT_SCHEMA.md](ACCURACY_PASSPORT_SCHEMA.md). A passport makes a
+run inspectable; it is not an accuracy certificate. The current penalty score
+remains an uncalibrated heuristic until controlled outcomes demonstrate
+reliable confidence buckets and acceptable Brier score.
+
+## Current evidence boundary
+
+The source suite validates formulas, state transitions, cancellation, endpoint
+ranking, privacy behavior, controlled-result ingestion, stage qualification,
+receipt disagreement, semantic invariants, and confidence sensitivity. A
+deterministic semantic harness executed 20 trials at each of eight speed tiers;
+it validates calculation behavior, not browser accuracy. This machine could not
+execute the Docker/netem/iperf3 matrix because its Docker engine is
+unavailable. Therefore no speed tier, browser family, native platform, or
+geographic region has passed the controlled accuracy gate in this session.
+
+Until the lab matrix is executed, NetPulse must not claim calibrated multi-gigabit accuracy, authoritative packet loss, validated regional coverage, or universal equivalence to Ookla, FAST.com, Cloudflare, M-Lab, or iperf3. Proposed tolerances in [METHODOLOGY.md](METHODOLOGY.md) are launch gates, not achieved results.
+
+## Reproducibility and retention
+
+The latest 20 complete privacy-filtered evidence records are stored only in local IndexedDB; normalized history remains local and is linked by run ID. JSON/CSV exports omit unavailable metrics and never include a full public IP. Lab result files are ignored by Git. Clearing or deleting history also clears linked raw evidence.
+
+## Known browser limits
+
+Fetch does not expose upload byte progress, retransmissions, congestion-control state, or link-layer bytes. Background tabs can throttle timers and networking. Browser/device processing, endpoint capacity, routing, VPNs, radio conditions, and connection reuse can affect results. A browser cannot reliably access Wi-Fi signal, router state, LAN devices, BGP routes, or raw UDP sockets. These constraints are recorded or disclosed rather than inferred away.
