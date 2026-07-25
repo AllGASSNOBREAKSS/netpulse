@@ -1,6 +1,10 @@
 # Privacy notice draft
 
-> **Draft for qualified legal review.** This document describes the intended implementation as of 2026-07-19. Hosting and security providers may process additional request metadata under their own settings and terms. Do not publish this as final legal advice without review.
+> **Draft for qualified legal review.** This document describes the current
+> implementation and proposed regional-node design as of 2026-07-25. Hosting,
+> measurement, identity, DNS, database, and security providers may process
+> additional request metadata under their own settings and terms. Do not
+> publish this as final legal advice without review.
 
 ## Local-first data
 
@@ -9,6 +13,34 @@ Speed-test history, ISP plan profiles, Fix My Internet sessions, and Connection 
 ## Network measurements and third parties
 
 The browser contacts the selected measurement, DNS, connectivity, and public-network identity endpoints described in the in-app methodology. Those providers receive ordinary request metadata, including the public address used to reach them. NetPulse should not claim those providers collect nothing. Current source does not add advertising analytics or cross-site tracking cookies.
+
+The current active speed-test fallback is Cloudflare anycast. NetPulse does not
+operate that service or control its independent data practices. ISP/ASN and
+approximate-location lookup is user initiated and uses the named third-party
+provider. Location may be wrong for VPN, relay, enterprise, mobile, satellite,
+or carrier-grade NAT users.
+
+## Proposed regional test nodes
+
+No NetPulse regional test node is currently deployed. Before a pilot, the
+reviewed protocol requires:
+
+- payload bodies generated only for measurement and never stored;
+- raw public addresses used transiently for routing and abuse control, not
+  application analytics;
+- rotating, purpose-separated pseudonymous abuse keys;
+- coarse regional operational aggregation;
+- short documented raw-log and security-event retention;
+- separate anonymous operational data and any future account data;
+- opt-in before retaining a user's result beyond what is necessary to execute
+  the requested test;
+- privacy-safe export/deletion and regional legal review.
+
+The proposed default targets are 24-72 hours for raw operational request logs
+when necessary and 30 days for coarse aggregates. Those are architecture
+targets, not a final promise. Actual periods, subprocessors, residency,
+cross-border transfers, consent, child protection, and legal bases require
+qualified review before each region launches.
 
 ## Area Pulse
 

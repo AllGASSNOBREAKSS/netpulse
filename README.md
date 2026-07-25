@@ -54,8 +54,8 @@ A staged pipeline — full detail in **[ENGINE.md](ENGINE.md)**:
 | Preflight | Browser, OS, device, tab state, IPv4/IPv6 availability, secure context, explicit Cloudflare WARP signal where reported, other VPN/proxy status **unknown**, estimated duration + data |
 | Server selection | Probes candidates, ranks by median latency + jitter + availability, explains the pick |
 | Idle latency | Timed zero-byte probes (`performance.now()`) → min / median / mean / **P95 / P99** / jitter |
-| Download | **Single- then multi-connection**, cache-busted, no-store; received payload ÷ actual phase time, with timed windows for variation |
-| Upload | Parallel POST of non-compressible in-memory payloads; successfully submitted payload ÷ actual phase time; no byte-level progress or server receipt is available from Fetch |
+| Download | Web Worker capacity ramp (1 → 2 → 4 → 6/8), cache-busted and no-store; separate maximum capacity, reliable stable-window, and single-stream results |
+| Upload | Adaptive POST ramp of pre-generated non-personal random payloads; successfully submitted/acknowledged application bytes divided by the shared stage time. Fetch has no byte-level upload progress; the Cloudflare received-byte header is used when exposed but is not a NetPulse authoritative receipt |
 | Loaded latency | Probed *while saturating* download, then upload — kept **separate** |
 | Bufferbloat | Loaded − idle rise, **separate download/upload grades A–F** |
 | Stability | 0–100 from latency stddev + spikes + throughput variation; P95/P99; longest spike |
@@ -123,8 +123,9 @@ inspectable and exportable as JSON.
 
 ## Honest limitations
 
-- **Packet loss is unavailable.** True end-to-end loss needs a UDP echo server
-  NetPulse doesn't run. A separate experimental **UDP reachability** signal performs a
+- **Packet loss is unavailable.** A browser-native end-to-end loss result needs
+  a validated cooperating unreliable echo/TURN service that NetPulse doesn't
+  run. A separate experimental **UDP reachability** signal performs a
   real WebRTC/STUN connectivity check and points to an OS-level `ping`; it never
   invents a loss percentage.
 - Browser fetch exposes received download chunks, but not byte-level upload
@@ -148,6 +149,13 @@ inspectable and exportable as JSON.
 [VALIDATION_REPORT.md](VALIDATION_REPORT.md) (current evidence and launch recommendation) ·
 [GLOBAL_ENDPOINTS.md](GLOBAL_ENDPOINTS.md) (active endpoint facts and activation gates) ·
 [GLOBAL_NETWORK.md](GLOBAL_NETWORK.md) (regional data-plane contract, rollout, selection, privacy, scaling, and validation gate) ·
+[NETPULSE_MEASUREMENT_SPEC.md](NETPULSE_MEASUREMENT_SPEC.md) (normative browser measurement contract) ·
+[TEST_NODE_PROTOCOL.md](TEST_NODE_PROTOCOL.md) (future dedicated node protocol and safety limits) ·
+[SERVER_DISCOVERY_SPEC.md](SERVER_DISCOVERY_SPEC.md) (endpoint selection, failover, and truth-mode rules) ·
+[MEASUREMENT_DEFECT_AUDIT.md](MEASUREMENT_DEFECT_AUDIT.md) (complete source and reliability audit) ·
+[HIGH_SPEED_VALIDATION_REPORT.md](HIGH_SPEED_VALIDATION_REPORT.md) (local worker-engine validation and unrun launch gates) ·
+[ACCURACY_CERTIFICATION_PLAN.md](ACCURACY_CERTIFICATION_PLAN.md) (controlled launch gates) ·
+[ACCURACY_PASSPORT_SCHEMA.md](ACCURACY_PASSPORT_SCHEMA.md) (versioned per-run evidence contract) ·
 [AUDIT.md](AUDIT.md) (codebase honesty audit) ·
 [SECURITY_AUDIT.md](SECURITY_AUDIT.md) (threat model and release gates) ·
 [DIAGNOSTICS.md](DIAGNOSTICS.md) (troubleshooting rules) ·

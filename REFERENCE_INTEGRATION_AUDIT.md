@@ -1,90 +1,99 @@
-# NetPulse reference-integration audit
+# NetPulse reference and integration audit
 
-Audit date: 2026-07-21. This document was completed before changing production measurement logic for this phase.
+Audit updated: 2026-07-25
+Policy: read-only methodology and architecture research; no referenced source
+code was copied into the current NetPulse changes
 
-## Current native engine
+## Why references are reviewed
 
-NetPulse is a React/Vite browser application. `src/lib/engine.ts` orchestrates browser-only modules for preflight, endpoint selection, latency, download, upload, experimental UDP reachability, calculations, and confidence. React calls the engine directly and receives callbacks. The selected endpoint comes from a versioned directory; the only checked-in public endpoint is Cloudflare anycast. History is privacy-minimized `localStorage` data.
+Internet tests answer different questions. Studying public methods prevents
+avoidable mistakes, but reproducing a competitor's displayed number is not an
+accuracy strategy. NetPulse adopts general, publicly documented engineering
+patterns only when they fit a browser-first, independently specified system.
 
-### Current measurement sources and formulas
+## Service and standards comparison
 
-| Metric | Source | Current formula | Audit status |
+| Reference | Public evidence | Useful pattern | NetPulse decision |
 | --- | --- | --- | --- |
-| Download | Streamed, cache-busted `fetch` responses | received application payload bits / actual monotonic phase seconds | Real; warm-up discarded, single and multi stream retained |
-| Upload | Generated in-memory bodies sent with `fetch` | successful submitted body bits / actual monotonic phase seconds | Real client-side submitted payload; server receipt is not independently acknowledged by the current public endpoint |
-| Idle latency | Sequential zero-byte HTTPS requests | median of 14 full or 10 low-data RTTs | Real application RTT; not ICMP |
-| Loaded latency | Zero-byte HTTPS probes during each directional load | median of successful probes | Real; download and upload remain separate |
-| Jitter | Ordered idle RTT samples | mean absolute consecutive RTT difference | Real calculated value |
-| Packet loss | WebRTC ICE/STUN reachability only | no loss percentage | Correctly unavailable; STUN is not loss |
-| Bufferbloat | Real idle and loaded medians | max(0, loaded median - idle median), per direction | Real calculated value |
-| Stability | Loaded RTT spread/spikes, throughput CoV, failures, completion | documented weighted penalty score | Calculated; needs richer phase evidence |
-| Internet health | Throughput, latency, bloat, jitter, stability, confidence | documented weighted score totaling 100 | Calculated and transparent; normative consumer thresholds, not a diagnostic fact |
-| Confidence | samples, variation, probes, warm-ups, duration, foreground state, errors | observable penalty model starting at 100 | Calculated; missing endpoint agreement/load, device calibration, retries, and main-thread evidence |
+| Ookla Speedtest | Multiple connections, adaptive chunks/buffers, extra connections during the first half, time-bounded phases, candidate latency selection | Adaptive saturation and server probing | Independently implement; no private protocol/API, result forcing, or affiliation |
+| FAST.com | Series of downloads/uploads against Netflix servers; estimates maximum speed; loaded/unloaded latency | Keep capacity distinct from loaded responsiveness | Do not use undocumented Netflix APIs or call Netflix CDN results universal truth |
+| Cloudflare Speedtest | Browser Resource Timing, increasing payload sizes through 250 MB, loaded-latency probes, configurable 90th percentile bandwidth, TURN-backed packet loss when configured | Browser-oriented request ramp and cooperating unreliable echo | Current endpoint use is direct and documented; no claim that NetPulse controls or capacity-certifies it |
+| M-Lab NDT7 | Locate-selected server, secure WebSocket, single TCP connection, client and server measurements, server TCP_INFO | Versioned protocol, server-side byte/duration evidence, validation adapter | Keep NDT7 comparison separate; single-flow semantics are not NetPulse multi-request capacity |
+| Broadband Forum TR-143 | HTTP/FTP diagnostics, time/file modes, IPv6, multiple connections with per-connection status, explicit whole-test failure | Retain per-request evidence and explicit failure | Browser NetPulse is not a CPE/TR-143 conformance implementation |
+| Broadband Forum TR-471 | Maximum IP-layer capacity as a defined metric separate from application throughput | Product categories must name measurement layer | NetPulse currently reports application throughput, not IP-layer capacity |
 
-### Accuracy and architecture problems
+Primary sources:
 
-1. The engine is one sequential promise with coarse UI phases. It has no durable phase journal, typed event stream, first-class cancellation result, or phase-specific retry record.
-2. Raw measurement callbacks update React on every sample and copy the live sample array. Rendering should consume a buffered lower-frequency stream instead.
-3. Only fixed full and low-data profiles exist. Per-request payload adapts after warm-up, but duration, stream count, timeouts, and total budgets are not calibrated across speed/device/latency tiers.
-4. Upload counts a request body after an HTTP success. A NetPulse endpoint should return an authenticated or same-origin accepted-byte receipt before claiming server-accepted bytes.
-5. Server ranking uses median, jitter, reachability, route consistency, health, load, and capacity, but does not explicitly penalize P95 tail latency. Only one real public endpoint currently prevents independent verification.
-6. Throughput retains mean phase rate, median windows, peak, samples, and CoV, but not P5/P95 in the normalized result.
-7. Latency summaries omit P90 and interquartile mean.
-8. Raw evidence lacks phase start/end timestamps, per-phase error/retry records, methodology/engine versions, calibration results, and visual/main-thread observations.
-9. History stores only normalized headlines and is capped at 50 entries. It cannot recalculate formulas from original evidence or apply robust multi-test alert debounce.
-10. IPv4/IPv6 reachability is best effort; throughput and latency are not measured separately per family.
-11. Errors are collapsed to a generic UI state. Incomplete results are not published, but the failure reason is not preserved for the user.
-12. No public production value was found using `Math.random`, mock data, demo values, or simulated packet loss. `crypto.getRandomValues` is used only to create non-personal incompressible upload payloads.
+- https://speedtest.zendesk.com/hc/en-us/articles/203845400-How-does-the-test-itself-work-How-is-the-result-calculated
+- https://speedtest.zendesk.com/hc/en-us/articles/203845410-How-does-the-Begin-Test-button-select-a-server-
+- https://fast.com/
+- https://github.com/cloudflare/speedtest
+- https://www.measurementlab.net/tests/ndt/ndt7/
+- https://github.com/m-lab/ndt7-js
+- https://www.broadband-forum.org/pdfs/tr-143-1-1-0.pdf
+- https://www.broadband-forum.org/technical-library/?number=TR-471
 
-## Reference repositories
+## Open-source repository matrix
 
-The audit used shallow, read-only snapshots. No source code is copied into NetPulse.
+The audited commit identifiers below record the earlier read-only snapshots
+used for the repository-level design review.
 
-| Repository | Audited commit | License | Useful patterns | Exclusions |
+| Repository | Audited commit | License | Patterns reviewed | Excluded |
 | --- | --- | --- | --- | --- |
-| `henrywhitaker3/Speedtest-Tracker` | `8cb2e8a3236850b4a07e887ac376c0d4d5e804f4` | GPL-3.0 | queued tests, provider interface, normalized history, failure events, threshold history | Legacy provider dependency, UI, branding, and Ookla execution are not adopted |
-| `sivel/speedtest-cli` | `22210ca35228f0bbcef75a7c14587c4ecb875ab4` | Apache-2.0 | upload preallocation, monotonic timing, bounded concurrency, cancellation, independent single/multi behavior | Its latency is explicitly non-authoritative; Speedtest.net endpoints/protocol and implementation are not adopted |
-| `sindresorhus/speed-test` | `200dda1b649eb00864a183912a9720ce2def7ae3` | MIT | event-driven progress separated from terminal rendering, concise final/JSON distinction | It wraps `speedtest-net`; neither dependency nor Ookla service becomes a NetPulse engine |
-| `alexjustesen/speedtest-tracker` | `166a84a8f5561059a642d1d5943cc0b8bf667534` | MIT | staged start/select/run/benchmark/complete jobs, explicit statuses, full raw provider data plus normalized fields, schedules, pruning, thresholds | Fake-result generator, provider branding, CLI invocation, and service-specific data are not adopted |
+| `henrywhitaker3/Speedtest-Tracker` | `8cb2e8a3236850b4a07e887ac376c0d4d5e804f4` | GPL-3.0 | queued execution, provider boundary, history, failure events | Ookla CLI execution, legacy defaults, UI/branding |
+| `sivel/speedtest-cli` | `22210ca35228f0bbcef75a7c14587c4ecb875ab4` | Apache-2.0 | upload preallocation, bounded concurrency, cancellation, single/multi modes | Speedtest.net protocol and non-authoritative HTTP latency |
+| `sindresorhus/speed-test` | `200dda1b649eb00864a183912a9720ce2def7ae3` | MIT | event-driven CLI progress and machine-readable output | `speedtest-net` dependency and Ookla service |
+| `alexjustesen/speedtest-tracker` | `166a84a8f5561059a642d1d5943cc0b8bf667534` | MIT | staged jobs/status, normalized plus raw results, pruning, thresholds | fake-result generator, provider branding, CLI invocation |
+| `cloudflare/speedtest` | current public repository reviewed 2026-07-25 | MIT | browser timing, payload ramp, loaded latency, TURN loss contract | no code incorporated; public service remains third party |
+| `m-lab/ndt7-js` | current public repository reviewed 2026-07-25 | Apache-2.0 | located endpoint, secure WebSocket, client/server events, explicit data-policy gate | no dependency added; no test sent to M-Lab |
 
-GPL-3.0, Apache-2.0, and MIT concepts can inform an AGPL-3.0-only project. Direct copying would create preservation/notice obligations, so this phase independently implements general architectural ideas and records attribution without importing code.
+The current NetPulse tree does not add these packages or copy their source.
+If later work incorporates code, the exact version, files, modifications,
+copyright notice, license text, and distribution obligations must be reviewed
+before the change is accepted.
 
-## Controlled integration plan
+## Current independent implementation
 
-| Pattern | Reference | Implementation approach | Why | NetPulse scope |
-| --- | --- | --- | --- | --- |
-| Durable staged pipeline | Both trackers | Independent typed state machine and phase journal | Prevent incomplete publication and preserve failures/timing | `types.ts`, new pipeline modules, `engine.ts` |
-| Typed progress events | `speed-test`, `speedtest-cli` callbacks | Independent event buffer with high-frequency raw retention and throttled subscribers | Decouple React work from measurement timing | new event module, `App.tsx` |
-| Cancellation | `speedtest-cli` shutdown event, tracker batch cancellation | `AbortSignal` propagated through every browser operation | Stop timers/fetches without leaking work | engine, latency, throughput, servers, preflight |
-| Upload payload reuse | `speedtest-cli` preallocation | Keep one Web Crypto-generated buffer per phase and reuse it | Avoid timed-phase allocation and compression artifacts | `throughput.ts` |
-| Rich normalized plus raw evidence | modern tracker | Versioned phase journal, samples, profile/calibration, endpoint probes, limitations | Allow later formula improvements | result types, export, local evidence storage |
-| Adaptive profile | `speedtest-cli` dynamic configuration concept | Independent calibration based on warm-up throughput, RTT, device/timer observations, low-data constraint | Avoid one profile for every link | profiles/calibration/engine |
-| Endpoint truth verification | nearest-server concepts plus NetPulse directory | Primary plus honest secondary-verification status; no consensus without a second validated endpoint | Detect endpoint constraints without inventing coverage | servers, verification, passport |
-| Accuracy Passport | NetPulse-specific | Evidence-derived summary of samples, endpoint health/agreement, device limitations, versions, retries, and reasons | Make trust inspectable | result types, report/export UI |
-| Historical debounce | trackers | Median/MAD personal baseline and configurable N-of-M confirmation, locally | Reduce one-run false alarms | history intelligence module |
-| Validation adapters | tracker provider interface | Types and disabled-by-default adapter registry only | Support lab comparisons without replacing public results | validation-only adapter module |
+The local engine now independently implements:
 
-## Deferred until infrastructure exists
+- versioned pipeline states and a durable phase journal;
+- cancellation propagated through browser operations;
+- Web Worker capacity measurement and statistics;
+- adaptive browser-request ramp and shared-window byte accounting;
+- separate Peak Capacity, Reliable Throughput, and single-request results;
+- pre-generated non-personal upload bodies;
+- privacy-filtered per-request diagnostics;
+- endpoint directory validation and explicit degraded mode;
+- Accuracy Passport evidence and local-only history/evidence;
+- unavailable packet loss when a suitable echo service does not exist.
 
-- A packet-loss percentage needs a reviewed NetPulse echo protocol.
-- Multi-server consensus needs a second independently validated endpoint.
-- Separate IPv4/IPv6 throughput needs endpoints with explicit family URLs.
-- Scheduled browser tests require a user-consented installed application, service worker constraints review, or native companion; a closed webpage cannot promise reliable schedules.
-- Public API, webhooks, Prometheus, notifications, accounts, and cross-device retention need authenticated backend product and privacy design.
-- Native Chrome/Edge/Firefox/Safari, mobile, Wi-Fi, VPN, and regional validation remain controlled-lab or field work, not browser-source changes.
+These are general engineering patterns. The formulas and schemas are defined
+by NetPulse in `NETPULSE_MEASUREMENT_SPEC.md`,
+`TEST_NODE_PROTOCOL.md`, `SERVER_DISCOVERY_SPEC.md`, and
+`ACCURACY_PASSPORT_SCHEMA.md`.
 
-## Implemented outcome
+## Compatibility and terms boundaries
 
-The audit findings were addressed with an independently implemented v3 browser pipeline:
+- Ookla and Netflix services are not integrated. Their private endpoints,
+  tokens, EULAs, or APIs must not be reverse engineered or embedded.
+- M-Lab use requires its current integration and data-policy requirements.
+  A validation adapter must be opt-in, separately labeled, and ineligible to
+  overwrite a NetPulse result.
+- Cloudflare's public speed endpoint is a third-party dependency. Availability,
+  terms, collection, and protocol behavior can change; it is not a substitute
+  for a NetPulse-operated node contract.
+- Broadband Forum documents are standards references; reading them does not
+  create conformance.
+- Trademarks and provider names remain the property of their owners. NetPulse
+  is independent and makes no affiliation claim.
 
-- `measurementPipeline.ts` provides the typed event stream, terminal states, durable phase journal, retry records, and 100 ms presentation batches.
-- `AbortSignal` reaches preflight, discovery/probing, latency, throughput, trace, and the WebRTC reachability probe. Cancelled or failed runs are not published.
-- Warm-up throughput calibrates request size and stream count within profile caps. Quick diagnostics now resolve to their own profile instead of silently using low-data settings.
-- Normalized throughput includes P5/P95 and actual stream/calibration data; latency includes P90 and interquartile mean.
-- `clientCalibration.ts` records timer, foreground, worker, processor, and payload-generation observations without inventing device capacity.
-- The Accuracy Passport exposes endpoint health/load, secondary-verification status, sample/failure counts, streams, data, duration, versions, retries, limitations, and confidence reductions.
-- Complete privacy-filtered raw events and phase journals are kept locally for the latest 20 successful runs in IndexedDB; compact history remains backward-compatible.
-- React speed-test and guided-diagnostic views consume buffered event batches rather than updating for every raw measurement callback.
-- Historical intelligence uses a median/MAD baseline and an explicit N-of-M confirmation rule; validation adapters are disabled by default and cannot enter public results.
+## Deferred integration decisions
 
-Still deferred: server-acknowledged upload byte receipts, true browser packet loss, a second independently validated throughput endpoint, separate IPv4/IPv6 throughput, reliable closed-page scheduling, and native cross-platform evidence.
+1. Whether to add `@m-lab/ndt7` as a consented validation-only adapter.
+2. Whether to reuse any MIT/Apache implementation code rather than continuing
+   the clean independent node/client implementation.
+3. Which providers and legal terms are acceptable for a US East node pilot.
+4. Whether a TURN/WebRTC loss service can meet cost, abuse, privacy, and
+   validation gates.
+
+No decision above is authorized by this Phase 1 audit.

@@ -1,5 +1,5 @@
-export const ENGINE_VERSION = "3.1.0";
-export const METHODOLOGY_VERSION = "2026.07.21-r2";
+export const ENGINE_VERSION = "4.0.1-local";
+export const METHODOLOGY_VERSION = "2026.07.25-high-speed-capacity-local";
 
 export type PipelinePhase =
   | "created"

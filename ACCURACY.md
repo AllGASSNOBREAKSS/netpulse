@@ -2,6 +2,14 @@
 
 NetPulse reports what its browser engine observed; it does not promise parity with another speed-test provider or claim worldwide accuracy without controlled evidence. The implemented formulas are specified in [METHODOLOGY.md](METHODOLOGY.md), and executed or blocked validation is recorded in [VALIDATION_REPORT.md](VALIDATION_REPORT.md).
 
+The normative measurement contract is
+[NETPULSE_MEASUREMENT_SPEC.md](NETPULSE_MEASUREMENT_SPEC.md). The complete
+per-metric source/reliability review is
+[MEASUREMENT_DEFECT_AUDIT.md](MEASUREMENT_DEFECT_AUDIT.md). Proposed
+certification gates are in
+[ACCURACY_CERTIFICATION_PLAN.md](ACCURACY_CERTIFICATION_PLAN.md); none of those
+gates has passed merely because the documents or lab scaffolding exist.
+
 ## What is directly observed
 
 - Download application bytes delivered to JavaScript and monotonic phase time.
@@ -27,6 +35,12 @@ Unavailable values are omitted or labeled unavailable. In particular, the curren
 Confidence starts at 100, subtracts only evidence-backed penalties, and is clamped to 0–100. Current factors include download/upload sample count and variation, idle and loaded-latency sample counts, endpoint reachability/jitter/health/load, warm-up and minimum-duration completion, tab visibility, request/probe errors, backup availability, and client-calibration warnings. Every applied deduction is returned as a visible reason.
 
 Each completed result receives an Accuracy Passport containing its run ID, engine and methodology versions, sample and failure counts, endpoint selection, backup verification status, endpoint health/load, stream counts, transferred data, duration, IP-family comparison, transport telemetry, browser state, phase retries, limitations, and confidence reasons. A bounded secondary download records agreement or disagreement but never replaces or averages the primary result.
+
+The future-compatible evidence contract is documented in
+[ACCURACY_PASSPORT_SCHEMA.md](ACCURACY_PASSPORT_SCHEMA.md). A passport makes a
+run inspectable; it is not an accuracy certificate. The current penalty score
+remains an uncalibrated heuristic until controlled outcomes demonstrate
+reliable confidence buckets and acceptable Brier score.
 
 ## Current evidence boundary
 

@@ -30,6 +30,7 @@ export type ServerCandidate = {
   city: string | null;
   countryCode: string | null;
   status: EndpointDirectoryEntry["status"];
+  downloadUrlTemplate: string;
   downPath: (bytes: number) => string;
   upPath: string;
   latencyPath: string;
@@ -290,6 +291,7 @@ function toCandidate(entry: EndpointDirectoryEntry): ServerCandidate {
     city: entry.city,
     countryCode: entry.countryCode,
     status: entry.status,
+    downloadUrlTemplate: entry.downloadUrlTemplate,
     downPath: (bytes) => entry.downloadUrlTemplate.replace("{bytes}", String(Math.max(0, Math.floor(bytes)))),
     upPath: entry.uploadUrl,
     latencyPath: entry.latencyUrl,
