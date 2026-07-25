@@ -19,6 +19,7 @@ import {
 import { probePacketLoss } from "./packetloss";
 import { runPreflight } from "./preflight";
 import { resolveProfile } from "./profiles";
+import { buildResultPublication } from "./resultPublication";
 import { verifySecondaryDownload } from "./secondaryVerification";
 import { getServer, selectServer } from "./servers";
 import { summarize } from "./stats";
@@ -33,6 +34,7 @@ import {
   type TestConfig,
   type TestResult,
   type ThroughputStats,
+  type UploadReceiptStatus,
 } from "./types";
 
 export type { Phase, TestConfig, TestResult, Sample, EngineCallbacks } from "./types";
@@ -67,6 +69,7 @@ async function fetchTrace(serverId: string, signal?: AbortSignal): Promise<Trace
 
 export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<TestResult> {
   const profile = resolveProfile(cfg.profile, cfg.lowData);
+  const profileMode = cfg.profile ?? (cfg.lowData ? "lowData" : "full");
   const monotonicStart = performance.now();
   const startedAt = Date.now();
   const runId = createRunId(startedAt);
@@ -160,8 +163,11 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
     cb.onPhase?.("download_single");
     let multiDownloadAnnounced = false;
     const downloadCapacity = await runCapacitySegment("download", recorder, cfg, (onStage) => measureDirectionCapacity({
+      runId,
       serverId,
       direction: "download",
+      profileMode,
+      endpointHealth: server.chosen.healthStatus,
       profile: profile.capacityDownload,
       onProgress: (mbps, streams) => push({
         phase: streams === 1 ? "download_single" : "download_multi",
@@ -190,8 +196,11 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
 
     cb.onPhase?.("upload");
     const uploadCapacity = await runCapacitySegment("upload", recorder, cfg, (onStage) => measureDirectionCapacity({
+      runId,
       serverId,
       direction: "upload",
+      profileMode,
+      endpointHealth: server.chosen.healthStatus,
       profile: profile.capacityUpload,
       onProgress: (mbps, streams) => push({ phase: "upload", mbps, streamMode: streams === 1 ? "single" : "multi" }),
       onLatency: (rtt) => push({ phase: "upload", rttMs: rtt }),
@@ -276,8 +285,8 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
       serverJitterMs: server.chosen.latency.jitter,
       downloadWarmupSucceeded: single.warmupSucceeded && multi.warmupSucceeded,
       uploadWarmupSucceeded: upload.warmupSucceeded,
-      downloadMinimumDurationMet: multi.durationMs >= profile.capacityDownload.stageMinMs,
-      uploadMinimumDurationMet: upload.durationMs >= profile.capacityUpload.stageMinMs,
+      downloadMinimumDurationMet: downloadCapacity.publication.maximum.status === "measured",
+      uploadMinimumDurationMet: uploadCapacity.publication.maximum.status === "measured",
       tabForegroundThroughout,
       completed: true,
       errors: requestErrors + loadedFailed,
@@ -287,8 +296,20 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
       backupEndpointCount: server.backups.length,
       clientLimited: calibration.likelyClientLimited,
       secondaryVerification: secondary.verification,
+      profileMode,
+      downloadPublication: downloadCapacity.publication.maximum.status,
+      uploadPublication: uploadCapacity.publication.maximum.status,
+      uploadReceiptStatus: summarizeUploadReceiptStatus(uploadCapacity),
+      semanticConsistency: downloadCapacity.publication.semanticConsistency.valid
+        && uploadCapacity.publication.semanticConsistency.valid,
+      phaseRetryCount: recorder.events.filter((event) => event.kind === "phase-retry").length,
     }));
     recorder.emit("confidence-updated", "calculating-confidence", { score: confidence.score }, true);
+    const publication = buildResultPublication({
+      confidence,
+      download: downloadCapacity,
+      upload: uploadCapacity,
+    });
 
     const limitations = buildLimitations({
       lowData: cfg.lowData,
@@ -349,6 +370,9 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
       secondaryVerification: secondary.verification,
       transportTelemetry,
       ipComparison: preflight.ipComparison,
+      resultPublication: publication,
+      downloadCapacity,
+      uploadCapacity,
     });
     const dataUsedMB = dataBytes / 1_000_000;
 
@@ -376,6 +400,7 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
       transportTelemetry,
       ispLocation,
       confidence,
+      publication,
       accuracyPassport,
       rawEvidence,
       dataUsedMB,
@@ -497,7 +522,8 @@ async function runCapacitySegment(
 }
 
 function bestStage(capacity: DirectionCapacity): CapacityStage {
-  return capacity.stages.reduce((best, stage) => stage.aggregateMbps > best.aggregateMbps ? stage : best);
+  return capacity.stages.find((stage) => stage.streams === capacity.selectedStreams)
+    ?? capacity.stages.reduce((best, stage) => stage.p50Mbps > best.p50Mbps ? stage : best);
 }
 
 function stageToThroughput(
@@ -506,7 +532,7 @@ function stageToThroughput(
   warmupSucceeded: boolean,
 ): ThroughputStats {
   return {
-    mbps: stage.aggregateMbps,
+    mbps: stage.p50Mbps,
     peakMbps: stage.peakMbps,
     medianMbps: stage.medianMbps,
     p5Mbps: stage.p5Mbps,
@@ -521,8 +547,8 @@ function stageToThroughput(
     streams: stage.streams,
     calibrationMbps: null,
     durationMs: stage.durationMs,
-    earlyStopped: false,
-    stableAtMs: null,
+    earlyStopped: stage.stopReason === "stable",
+    stableAtMs: stage.stopReason === "stable" ? stage.durationMs : null,
     stopReason: stage.stopReason,
     failedRequests: stage.failedRequests,
     failedProbes: stage.failedProbes,
@@ -574,4 +600,15 @@ function buildLimitations(input: {
 
 function payloadBytes(stats: { bytes: number; warmupBytes: number }): number {
   return stats.bytes + stats.warmupBytes;
+}
+
+function summarizeUploadReceiptStatus(capacity: DirectionCapacity): UploadReceiptStatus {
+  const receipts = capacity.diagnostics
+    .filter((item) => item.direction === "upload" && item.stage === "measurement" && item.outcome === "completed")
+    .flatMap((item) => item.uploadReceipt === null ? [] : [item.uploadReceipt]);
+  if (receipts.some((receipt) => receipt.status === "mismatch")) return "mismatch";
+  if (receipts.some((receipt) => receipt.status === "invalid")) return "invalid";
+  if (receipts.length === 0 || receipts.some((receipt) => receipt.status === "missing")) return "missing";
+  if (receipts.every((receipt) => receipt.status === "verified")) return "verified";
+  return "partial";
 }

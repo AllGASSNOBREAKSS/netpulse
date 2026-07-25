@@ -20,6 +20,8 @@
 import type { TestResult } from "./engine";
 
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
+const publishedDownload = (r: TestResult) => r.publication?.download.valueMbps ?? (r.publication ? null : r.downloadMbps);
+const publishedUpload = (r: TestResult) => r.publication?.upload.valueMbps ?? (r.publication ? null : r.uploadMbps);
 
 /** Log-ish curve: 1.0 at `full`, ~0.5 around full/5, 0 at 0. */
 function curve(value: number, full: number): number {
@@ -38,6 +40,8 @@ export type ScoreRule = {
   rule: string;
   /** The measured input, formatted for display. */
   input: (r: TestResult) => string;
+  /** False omits unavailable evidence instead of scoring it as zero. */
+  applicable?: (r: TestResult) => boolean;
   /** 0–1 quality factor computed from measured data only. */
   quality: (r: TestResult) => number;
 };
@@ -56,16 +60,24 @@ export const SCORE_RULES: ScoreRule[] = [
     label: "Download speed",
     weight: 24,
     rule: "Log curve — full points at 300 Mbps, ~half at 20 Mbps",
-    input: (r) => `${fmt(r.downloadMbps)} Mbps`,
-    quality: (r) => curve(r.downloadMbps, 300),
+    applicable: (r) => publishedDownload(r) !== null,
+    input: (r) => {
+      const value = publishedDownload(r);
+      return value === null ? "inconclusive" : `${fmt(value)} Mbps`;
+    },
+    quality: (r) => curve(publishedDownload(r) ?? 0, 300),
   },
   {
     id: "upload",
     label: "Upload speed",
     weight: 16,
     rule: "Log curve — full points at 50 Mbps, ~half at 4 Mbps",
-    input: (r) => `${fmt(r.uploadMbps)} Mbps`,
-    quality: (r) => curve(r.uploadMbps, 50),
+    applicable: (r) => publishedUpload(r) !== null,
+    input: (r) => {
+      const value = publishedUpload(r);
+      return value === null ? "inconclusive" : `${fmt(value)} Mbps`;
+    },
+    quality: (r) => curve(publishedUpload(r) ?? 0, 50),
   },
   {
     id: "idleLatency",
@@ -131,15 +143,22 @@ export type ScorePart = {
 export type ScoreBreakdown = { total: number; parts: ScorePart[] };
 
 export function computeScore(r: TestResult): ScoreBreakdown {
-  const parts = SCORE_RULES.map((c) => ({
-    id: c.id,
-    label: c.label,
-    weight: c.weight,
-    earned: c.scored === false ? 0 : Math.round(c.quality(r) * c.weight * 10) / 10,
-    input: c.input(r),
-    rule: c.rule,
-    scored: c.scored !== false,
-  }));
+  const applicableWeight = SCORE_RULES.reduce((sum, rule) =>
+    rule.scored === false || rule.applicable?.(r) === false ? sum : sum + rule.weight, 0);
+  const scale = applicableWeight > 0 ? 100 / applicableWeight : 0;
+  const parts = SCORE_RULES.map((c) => {
+    const scored = c.scored !== false && c.applicable?.(r) !== false;
+    const weight = scored ? Math.round(c.weight * scale * 10) / 10 : 0;
+    return {
+      id: c.id,
+      label: c.label,
+      weight,
+      earned: scored ? Math.round(c.quality(r) * weight * 10) / 10 : 0,
+      input: c.input(r),
+      rule: scored ? c.rule : `${c.rule}; omitted because the metric was inconclusive`,
+      scored,
+    };
+  });
   return { total: Math.round(parts.reduce((sum, p) => sum + p.earned, 0)), parts };
 }
 

@@ -12,7 +12,7 @@ import type { Verdict } from "./verdict";
 export const METHODOLOGY = [
   "NetPulse measures against the endpoint selected from its validated directory. The checked-in public fallback is Cloudflare anycast; future NetPulse-operated regions remain unsupported until deployed and independently validated. Results reflect the chosen route and can differ from Ookla, Fast.com, Cloudflare, or M-Lab because servers, stream counts, duration, and aggregation differ. We do not tune NetPulse to match them.",
   "Latency is measured with zero-byte HTTPS requests timed by performance.now() (monotonic, sub-millisecond). HTTP round-trips read slightly higher than raw ICMP ping.",
-  "Throughput uses discarded connection warm-ups, adaptive request payloads, adaptive concurrency, and cache-busted no-store requests. Download runs single-connection then multi-connection. The aggregate result is measured application payload divided by actual phase time; measured windows provide P5, median, P95, peak, and variation context. Upload uses cumulative successfully submitted payload observations because Fetch exposes no byte-level upload progress or server-received byte receipt.",
+  "Throughput uses discarded connection warm-ups, adaptive request payloads, adaptive concurrency, and cache-busted no-store requests. Maximum, reliable, and single-stream products use the same pool of duration-qualified, receipt-consistent stage aggregates. Short or data-limited evidence is published only as a quick estimate; inconsistent evidence is inconclusive.",
   "Download and upload run sequentially so loaded latency stays attributable to one direction. A simultaneous full-duplex stress test answers a different question and would not make NetPulse identical to services using different endpoints or aggregation methods.",
   "Loaded latency is probed continuously during download and upload; bufferbloat is the increase over idle, graded separately per direction.",
   "Packet loss is unavailable: the experimental WebRTC/STUN card reports UDP reachability, not an end-to-end loss percentage.",
@@ -44,6 +44,7 @@ export function buildExport(result: TestResult, verdict: Verdict | null) {
     results: {
       score: verdict?.score ?? null,
       confidence: result.confidence,
+      publication: result.publication,
       download: result.download,
       upload: result.upload,
       idleLatency: result.idleLatency,
@@ -98,6 +99,10 @@ export function downloadJson(result: TestResult, verdict: Verdict | null) {
 
 /** Flatten a result to a single CSV row of the headline metrics. */
 export function resultCsvRows(result: TestResult, verdict: Verdict | null): Record<string, string | number>[] {
+  const download = result.publication.download.valueMbps;
+  const upload = result.publication.upload.valueMbps;
+  const capacityDownload = result.capacity.download.publication;
+  const capacityUpload = result.capacity.upload.publication;
   return [
     {
       timestamp: new Date(result.timestamp).toISOString(),
@@ -105,20 +110,20 @@ export function resultCsvRows(result: TestResult, verdict: Verdict | null): Reco
       engine_version: result.engineVersion,
       health_score: verdict?.score ?? "",
       confidence: result.confidence.score,
-      download_mbps: result.downloadMbps.toFixed(1),
-      download_maximum_capacity_mbps: result.capacity.download.maximumMbps.toFixed(1),
-      download_reliable_mbps: result.capacity.download.reliable.mbps.toFixed(1),
-      download_single_stream_mbps: result.capacity.download.singleStreamMbps.toFixed(1),
+      download_mbps: formatNullable(download),
+      download_maximum_capacity_mbps: formatNullable(capacityDownload.maximum.valueMbps),
+      download_reliable_mbps: formatNullable(capacityDownload.reliable.valueMbps),
+      download_single_stream_mbps: formatNullable(capacityDownload.singleStream.valueMbps),
       download_p90_window_mbps: percentile(result.download.multi.samples, 90).toFixed(1),
       download_p5_window_mbps: result.download.multi.p5Mbps.toFixed(1),
       download_p95_window_mbps: result.download.multi.p95Mbps.toFixed(1),
       download_median_window_mbps: result.download.multi.medianMbps.toFixed(1),
       download_peak_window_mbps: result.download.multi.peakMbps.toFixed(1),
       download_variation_pct: result.download.multi.variationPct.toFixed(1),
-      upload_mbps: result.uploadMbps.toFixed(1),
-      upload_maximum_capacity_mbps: result.capacity.upload.maximumMbps.toFixed(1),
-      upload_reliable_mbps: result.capacity.upload.reliable.mbps.toFixed(1),
-      upload_single_stream_mbps: result.capacity.upload.singleStreamMbps.toFixed(1),
+      upload_mbps: formatNullable(upload),
+      upload_maximum_capacity_mbps: formatNullable(capacityUpload.maximum.valueMbps),
+      upload_reliable_mbps: formatNullable(capacityUpload.reliable.valueMbps),
+      upload_single_stream_mbps: formatNullable(capacityUpload.singleStream.valueMbps),
       upload_median_observation_mbps: result.upload.medianMbps.toFixed(1),
       upload_peak_observation_mbps: result.upload.peakMbps.toFixed(1),
       upload_variation_pct: result.upload.variationPct.toFixed(1),
@@ -155,15 +160,20 @@ export function downloadCsvResult(result: TestResult, verdict: Verdict | null) {
 export function buildShareReport(result: TestResult, verdict: Verdict | null): string {
   const r = result;
   const L = (n: number, d = 0) => n.toFixed(d);
+  const publishedDownload = r.publication.download.valueMbps;
+  const publishedUpload = r.publication.upload.valueMbps;
   return [
     `# NetPulse report`,
     ``,
     `**Overall health:** ${verdict?.score ?? "—"}/100 — ${verdict?.headline ?? ""}`,
     `**Result confidence:** ${r.confidence.score}% (${r.confidence.summary})`,
+    ...r.publication.labels.map((label) => `**${label}**`),
+    `**Publication outcome:** ${r.publication.outcome}`,
+    `**Accuracy certification:** Not accuracy-certified`,
     ``,
     `## Metrics`,
-    `- Download: **${L(r.downloadMbps, 1)} Mbps** aggregate (P5/P95 windows ${L(r.download.multi.p5Mbps, 1)}/${L(r.download.multi.p95Mbps, 1)}; single ${L(r.download.single.mbps, 1)})`,
-    `- Upload: **${L(r.uploadMbps, 1)} Mbps** successfully submitted payload (peak observation ${L(r.upload.peakMbps, 1)})`,
+    `- Download: **${publishedDownload === null ? "measurement inconclusive" : `${L(publishedDownload, 1)} Mbps`}**`,
+    `- Upload: **${publishedUpload === null ? "measurement inconclusive" : `${L(publishedUpload, 1)} Mbps`}**`,
     `- Idle latency: **${L(r.idlePingMs)} ms**  (p95 ${L(r.idleLatency.p95)}, jitter ${L(r.idleJitterMs, 1)})`,
     `- Loaded latency: down ${L(r.loadedDownPingMs)} ms / up ${L(r.loadedUpPingMs)} ms`,
     `- Bufferbloat: **${r.bufferbloatGrade}** (+${L(r.bufferbloatMs)} ms; down ${r.bufferbloat.downloadGrade} / up ${r.bufferbloat.uploadGrade})`,
@@ -177,6 +187,10 @@ export function buildShareReport(result: TestResult, verdict: Verdict | null): s
     `## Diagnosis`,
     ...(verdict?.bad.length ? verdict.bad.map((b) => `- ⚠ ${b}`) : ["- No major problems found."]),
     ``,
-    `_Measured with NetPulse against Cloudflare's anycast endpoint. Public IP omitted for privacy. Results reflect the path to the nearest Cloudflare edge and differ from other speed tests by design._`,
+    `_This test uses one Cloudflare anycast measurement origin. Independent endpoint verification is not yet available. Routing and endpoint conditions can influence results. Public IP omitted for privacy._`,
   ].join("\n");
+}
+
+function formatNullable(value: number | null): string {
+  return value === null ? "" : value.toFixed(1);
 }

@@ -170,32 +170,36 @@ export default function App() {
       });
       const v = judge(r);
       setVerdict(v);
-      const entry: HistoryEntry = {
-        runId: r.runId,
-        ts: r.timestamp,
-        down: r.downloadMbps,
-        up: r.uploadMbps,
-        ping: r.idlePingMs,
-        bloat: r.bufferbloatMs,
-        grade: r.bufferbloatGrade,
-        score: v.score,
-        dataMB: r.dataUsedMB,
-        isp: r.ispLocation.ispHint ?? undefined,
-        server: `${r.server.chosen.provider}${r.server.chosen.edgeCode ? ` ${r.server.chosen.edgeCode}` : ""}`.trim(),
-        confidence: r.confidence.score,
-        loadedDownMs: r.loadedDownPingMs,
-        loadedUpMs: r.loadedUpPingMs,
-        jitterMs: r.idleJitterMs,
-        stabilityScore: r.stability.score,
-        durationMs: r.durationMs,
-        connectionMedium: "unknown",
-        timezoneOffsetMinutes: new Date(r.timestamp).getTimezoneOffset(),
-      };
-      setHistory((prev) => {
-        const next = [entry, ...prev];
-        saveHistory(next);
-        return next;
-      });
+      const publishedDown = r.publication.download.valueMbps;
+      const publishedUp = r.publication.upload.valueMbps;
+      if (publishedDown !== null && publishedUp !== null) {
+        const entry: HistoryEntry = {
+          runId: r.runId,
+          ts: r.timestamp,
+          down: publishedDown,
+          up: publishedUp,
+          ping: r.idlePingMs,
+          bloat: r.bufferbloatMs,
+          grade: r.bufferbloatGrade,
+          score: v.score,
+          dataMB: r.dataUsedMB,
+          isp: r.ispLocation.ispHint ?? undefined,
+          server: `${r.server.chosen.provider}${r.server.chosen.edgeCode ? ` ${r.server.chosen.edgeCode}` : ""}`.trim(),
+          confidence: r.confidence.score,
+          loadedDownMs: r.loadedDownPingMs,
+          loadedUpMs: r.loadedUpPingMs,
+          jitterMs: r.idleJitterMs,
+          stabilityScore: r.stability.score,
+          durationMs: r.durationMs,
+          connectionMedium: "unknown",
+          timezoneOffsetMinutes: new Date(r.timestamp).getTimezoneOffset(),
+        };
+        setHistory((prev) => {
+          const next = [entry, ...prev];
+          saveHistory(next);
+          return next;
+        });
+      }
     } catch (error) {
       if (isCancellation(error)) {
         setLiveDown(null);
@@ -217,9 +221,11 @@ export default function App() {
   const openDef = openMetric ? METRICS.find((m) => m.id === openMetric) : null;
   const isDownloadPhase = phase === "download_single" || phase === "download_multi";
   const isUploadPhase = phase === "upload";
+  const publishedDownload = result?.publication.download.valueMbps ?? null;
+  const publishedUpload = result?.publication.upload.valueMbps ?? null;
   const gaugeValues = useGaugeMotion({
-    download: phase === "done" && result ? result.downloadMbps : liveDown ?? 0,
-    upload: phase === "done" && result ? result.uploadMbps : liveUp ?? 0,
+    download: phase === "done" && result ? publishedDownload ?? 0 : liveDown ?? 0,
+    upload: phase === "done" && result ? publishedUpload ?? 0 : liveUp ?? 0,
   });
 
   /* ---- Speed Test page ---- */
@@ -247,7 +253,7 @@ export default function App() {
             active={isDownloadPhase}
             done={phase === "done"}
             hasMeasured={liveDown !== null || (phase === "done" && result !== null)}
-            finalMbps={result?.downloadMbps ?? null}
+            finalMbps={publishedDownload}
           />
           <Gauge
             label="Upload"
@@ -255,7 +261,7 @@ export default function App() {
             active={isUploadPhase}
             done={phase === "done"}
             hasMeasured={liveUp !== null || (phase === "done" && result !== null)}
-            finalMbps={result?.uploadMbps ?? null}
+            finalMbps={publishedUpload}
           />
         </div>
 
@@ -268,6 +274,14 @@ export default function App() {
             {running && <span className="pulse-dot" aria-hidden="true" />}
             {PHASE_LABEL[phase]}
           </p>
+          {result && phase === "done" && (
+            <div className="space-y-1 text-center text-[12px] leading-relaxed text-muted-foreground" role="note">
+              {result.publication.labels.map((label) => (
+                <p key={label} className="font-medium text-status-warn">{label}</p>
+              ))}
+              <p>Not accuracy-certified.</p>
+            </div>
+          )}
 
           <div className="flex flex-wrap items-center justify-center gap-2.5">
             <Button
@@ -371,8 +385,8 @@ export default function App() {
             <StatGrid
               columns={4}
               stats={[
-                { label: "Download", value: `${fmtMbps(result.downloadMbps)} Mbps` },
-                { label: "Upload", value: `${fmtMbps(result.uploadMbps)} Mbps` },
+                { label: "Download", value: publishedDownload === null ? "Measurement inconclusive" : `${fmtMbps(publishedDownload)} Mbps` },
+                { label: "Upload", value: publishedUpload === null ? "Measurement inconclusive" : `${fmtMbps(publishedUpload)} Mbps` },
                 { label: "Idle latency", value: `${Math.round(result.idlePingMs)} ms` },
                 {
                   label: "Bufferbloat",
@@ -389,6 +403,9 @@ export default function App() {
                 },
               ]}
             />
+            <p className="mt-4 text-[12px] leading-relaxed text-muted-foreground" role="note">
+              {result.publication.disclosures.join(" ")}
+            </p>
             <p className="text-[12.5px] leading-relaxed text-muted-foreground">
               Location is derived from your IP's routing region — it describes the network, not your
               address. The IP is masked here and is never included in exports or shared reports.

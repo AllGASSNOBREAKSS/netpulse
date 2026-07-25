@@ -4,7 +4,13 @@
  * reason is surfaced in the UI so the score is explainable.
  */
 import { coefficientOfVariation } from "./stats";
-import type { Confidence, ConfidenceReason, SecondaryVerification } from "./types";
+import type {
+  Confidence,
+  ConfidenceReason,
+  SecondaryVerification,
+  ThroughputPublicationStatus,
+  UploadReceiptStatus,
+} from "./types";
 
 export type ConfidenceInputs = {
   downloadSamples: number[];
@@ -28,6 +34,12 @@ export type ConfidenceInputs = {
   backupEndpointCount?: number;
   clientLimited?: boolean;
   secondaryVerification?: SecondaryVerification;
+  profileMode?: "full" | "lowData" | "quick";
+  downloadPublication?: ThroughputPublicationStatus;
+  uploadPublication?: ThroughputPublicationStatus;
+  uploadReceiptStatus?: UploadReceiptStatus;
+  semanticConsistency?: boolean;
+  phaseRetryCount?: number;
 };
 
 export function computeConfidence(i: ConfidenceInputs): Confidence {
@@ -188,6 +200,57 @@ export function computeConfidence(i: ConfidenceInputs): Confidence {
       i.clientLimited ? "This browser or device may be limiting measured throughput" : "No client-side calibration warning was detected",
       12,
     );
+  }
+
+  for (const [label, status] of [
+    ["Download qualification", i.downloadPublication],
+    ["Upload qualification", i.uploadPublication],
+  ] as const) {
+    if (status === undefined || status === "measured") continue;
+    add(
+      label,
+      false,
+      status === "quick-estimate" ? "Evidence supports only a quick estimate" : "Headline throughput evidence was inconclusive",
+      status === "quick-estimate" ? 10 : 24,
+    );
+  }
+  if (i.uploadReceiptStatus !== undefined) {
+    const status = i.uploadReceiptStatus;
+    add(
+      "Upload receipt",
+      status === "verified",
+      status === "verified"
+        ? "Versioned server receipt matched the request"
+        : status === "partial"
+          ? "Server byte receipt matched, but complete receipt identity was unavailable"
+          : `Upload receipt evidence was ${status}`,
+      status === "partial" ? 4 : status === "missing" ? 12 : 25,
+    );
+  }
+  if (i.semanticConsistency !== undefined) {
+    add(
+      "Metric semantics",
+      i.semanticConsistency,
+      i.semanticConsistency
+        ? "Maximum, reliable, and single-stream products were semantically consistent"
+        : "At least one throughput invariant remained unresolved",
+      25,
+    );
+  }
+  if (i.phaseRetryCount !== undefined && i.phaseRetryCount > 0) {
+    add("Phase retry", false, `${i.phaseRetryCount} measurement phase retry attempt(s) were required`, Math.min(12, i.phaseRetryCount * 6));
+  }
+
+  const profileCeiling = i.profileMode === "quick" ? 55 : i.profileMode === "lowData" ? 65 : 100;
+  if (score > profileCeiling) {
+    const reduction = score - profileCeiling;
+    score = profileCeiling;
+    reasons.push({
+      label: "Profile confidence ceiling",
+      ok: false,
+      detail: `${i.profileMode === "quick" ? "Quick" : "Low-data"} mode is capped at ${profileCeiling}% confidence`,
+      penalty: reduction,
+    });
   }
 
   score = Math.max(0, Math.min(100, Math.round(score)));

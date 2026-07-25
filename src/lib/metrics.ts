@@ -36,6 +36,10 @@ export type MetricDef = {
 };
 
 const fmt = (n: number) => (n >= 100 ? String(Math.round(n)) : n.toFixed(1));
+const publishedValue = (r: Partial<TestResult>, direction: "download" | "upload") =>
+  r.publication?.[direction].valueMbps ?? null;
+const publicationPart = (label: string, value: number | null, status: string) =>
+  status === "inconclusive" || value === null ? `${label} inconclusive` : `${label} ${fmt(value)}`;
 
 const DL_PHASES = ["download_single", "download_multi"];
 const rttsOf = (r: TestResult, phases: string[]) =>
@@ -49,11 +53,18 @@ export const METRICS: MetricDef[] = [
     name: "Download speed",
     provenance: "measured",
     hotPhase: "download",
-    value: (r) => (r.downloadMbps !== undefined ? `${fmt(r.downloadMbps)} Mbps` : null),
+    value: (r) => {
+      const value = publishedValue(r, "download");
+      return value === null ? null : `${fmt(value)} Mbps`;
+    },
     sub: (r) =>
-      r.capacity ? `maximum ${fmt(r.capacity.download.maximumMbps)} · reliable ${fmt(r.capacity.download.reliable.mbps)} · single ${fmt(r.capacity.download.singleStreamMbps)}` : null,
+      r.capacity ? [
+        publicationPart("maximum", r.capacity.download.publication.maximum.valueMbps, r.capacity.download.publication.maximum.status),
+        publicationPart("reliable", r.capacity.download.publication.reliable.valueMbps, r.capacity.download.publication.reliable.status),
+        publicationPart("single", r.capacity.download.publication.singleStream.valueMbps, r.capacity.download.publication.singleStream.status),
+      ].join(" · ") : null,
     what: "How much data your connection can pull down per second — the headline number ISPs advertise.",
-    how: "A discarded warm-up transfer primes the route and sizes later requests. A Web Worker then tests 1 → 2 → 4 → 6 → 8 concurrent HTTPS requests in Full mode while aggregate throughput is still improving. Every request is cache-busted, no-store, and rejected if the response reports compression. Maximum Capacity is the best qualifying stage's exact application bytes divided by one shared monotonic stage window. Reliable Throughput is the median of the stable half of real 500 ms windows from the highest completed stage using at most four requests.",
+    how: "A discarded warm-up transfer primes the route and sizes later requests. A Web Worker then tests 1 → 2 → 4 → 6 → 8 concurrent HTTPS requests in Full mode while throughput is improving. Requests are cache-busted and responses with compression are rejected. Maximum Capacity is the highest qualified fixed-window P50, Reliable Throughput is P25 of stable windows from the best qualified stage using at most four requests, and Single Stream is P50 from the dedicated one-request phase.",
     why: "Determines how fast pages, downloads, streams and updates arrive. The gap between single and multi connection speed hints at whether a single flow is being shaped. Past ~100 Mbps, responsiveness (latency) matters more than raw speed.",
     bands: [
       { range: "≥ 300 Mbps", label: "More than almost any household needs" },
@@ -78,9 +89,16 @@ export const METRICS: MetricDef[] = [
     name: "Upload speed",
     provenance: "measured",
     hotPhase: "upload",
-    value: (r) => (r.uploadMbps !== undefined ? `${fmt(r.uploadMbps)} Mbps` : null),
+    value: (r) => {
+      const value = publishedValue(r, "upload");
+      return value === null ? null : `${fmt(value)} Mbps`;
+    },
     sub: (r) =>
-      r.capacity ? `maximum ${fmt(r.capacity.upload.maximumMbps)} · reliable ${fmt(r.capacity.upload.reliable.mbps)} · single ${fmt(r.capacity.upload.singleStreamMbps)}` : null,
+      r.capacity ? [
+        publicationPart("maximum", r.capacity.upload.publication.maximum.valueMbps, r.capacity.upload.publication.maximum.status),
+        publicationPart("reliable", r.capacity.upload.publication.reliable.valueMbps, r.capacity.upload.publication.reliable.status),
+        publicationPart("single", r.capacity.upload.publication.singleStream.valueMbps, r.capacity.upload.publication.singleStream.status),
+      ].join(" · ") : null,
     what: "How much data your connection can push out per second.",
     how: "A discarded generated-payload warm-up primes the route. Before each timed stage, the Web Worker creates one non-personal, incompressible body and reuses it across a 1 → 2 → 4 request ramp so random-byte generation cannot depress the timed network result on mobile hardware. A completed request counts the provider's allowlisted received-byte receipt when exposed; otherwise it counts the successfully submitted application payload. Fetch still exposes neither byte-level upload progress nor wire overhead.",
     why: "Video calls, livestreaming, cloud backups and sending files all depend on upload. Many cable plans are heavily asymmetric — a fraction of the download figure.",

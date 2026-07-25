@@ -61,11 +61,28 @@ describe("measurement pipeline integration", () => {
     expect(result.capacity.download.maximumMbps).toBeGreaterThan(0);
     expect(result.capacity.download.reliable.mbps).toBeGreaterThan(0);
     expect(result.capacity.download.singleStreamMbps).toBeGreaterThan(0);
+    const publishedMaximum = result.capacity.download.publication.maximum.valueMbps;
+    if (publishedMaximum === null) throw new Error("Expected a publishable download maximum.");
+    if (result.capacity.download.publication.reliable.valueMbps !== null) {
+      expect(result.capacity.download.publication.reliable.valueMbps).toBeLessThanOrEqual(publishedMaximum);
+    } else {
+      expect(result.capacity.download.publication.reliable.status).toBe("inconclusive");
+    }
+    if (result.capacity.download.publication.singleStream.valueMbps !== null) {
+      expect(result.capacity.download.publication.singleStream.valueMbps).toBeLessThanOrEqual(
+        publishedMaximum,
+      );
+    }
+    expect(result.publication.accuracyCertified).toBe(false);
+    expect(result.publication.labels).toContain("Quick estimate.");
+    expect(result.engineVersion).toBe("4.1.0");
+    expect(result.methodologyVersion).toBe("2026.07.25-phase2-semantics-v1");
     expect(result.rawEvidence.streamDiagnostics.length).toBeGreaterThan(0);
     expect(result.runId).toMatch(/^np-/);
     expect(result.rawEvidence.events.length).toBeGreaterThan(result.samples.length);
     expect(result.rawEvidence.phases.every((phase) => phase.status === "completed")).toBe(true);
     expect(result.accuracyPassport.validSampleCount).toBe(result.samples.length);
+    expect(result.accuracyPassport.resultPublication).toEqual(result.publication);
     expect(result.accuracyPassport.secondaryVerification.status).toBe("unavailable");
     expect(result.preflight.ipComparison.ipv4.successful).toBeGreaterThan(0);
     expect(result.transportTelemetry.serverTransport).toBe("unknown");

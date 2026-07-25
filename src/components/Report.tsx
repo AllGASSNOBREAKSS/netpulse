@@ -155,10 +155,10 @@ export function MethodologyModal({
             <tr><td className="mi__range">Secondary verification</td><td>{result.accuracyPassport.secondaryVerification.reason}</td></tr>
             <tr><td className="mi__range">Echo / packet loss</td><td>{result.packetLoss.note}</td></tr>
             <tr><td className="mi__range">Payload transferred</td><td>{result.dataUsedMB.toFixed(1)} MB including discarded warm-ups, in {(result.durationMs / 1000).toFixed(1)} s</td></tr>
-            <tr><td className="mi__range">Download capacity</td><td>{result.capacity.download.maximumMbps.toFixed(1)} Mbps maximum · {result.capacity.download.selectedStreams} stream(s) · {result.capacity.download.stages.length} ramp stage(s) · {formatBytes(result.capacity.download.bytes)} total payload · worker {result.capacity.download.workerUsed ? "used" : "unavailable"}</td></tr>
-            <tr><td className="mi__range">Reliable download</td><td>{result.capacity.download.reliable.mbps.toFixed(1)} Mbps {result.capacity.download.reliable.status === "measured" ? "stable-window median" : "limited estimate"} · single stream {result.capacity.download.singleStreamMbps.toFixed(1)} Mbps · P5 {result.capacity.download.reliable.p5Mbps.toFixed(1)} / P95 {result.capacity.download.reliable.p95Mbps.toFixed(1)} Mbps · {result.capacity.download.reliable.sampleCount} window(s){result.capacity.download.reliable.limitation ? ` · ${result.capacity.download.reliable.limitation}` : ""}</td></tr>
+            <tr><td className="mi__range">Download capacity</td><td>{formatPublicationMetric(result.capacity.download.publication.maximum)} · {result.capacity.download.selectedStreams} stream(s) · {result.capacity.download.stages.length} ramp stage(s) · {formatBytes(result.capacity.download.bytes)} total payload · worker {result.capacity.download.workerUsed ? "used" : "unavailable"}</td></tr>
+            <tr><td className="mi__range">Reliable download</td><td>{formatPublicationMetric(result.capacity.download.publication.reliable)} · single stream {formatPublicationMetric(result.capacity.download.publication.singleStream)} · {result.capacity.download.reliable.sampleCount} comparable stage(s){result.capacity.download.reliable.limitation ? ` · ${result.capacity.download.reliable.limitation}` : ""}</td></tr>
             <tr><td className="mi__range">Download requests</td><td>{formatBytes(result.download.multi.requestBytes)} adaptive payload · warm-up {result.download.multi.warmupSucceeded ? "completed" : "failed"}</td></tr>
-            <tr><td className="mi__range">Upload capacity</td><td>{result.capacity.upload.maximumMbps.toFixed(1)} Mbps maximum · reliable {result.capacity.upload.reliable.mbps.toFixed(1)} Mbps · single stream {result.capacity.upload.singleStreamMbps.toFixed(1)} Mbps · {result.capacity.upload.selectedStreams} stream(s) · {formatBytes(result.capacity.upload.bytes)} total payload</td></tr>
+            <tr><td className="mi__range">Upload capacity</td><td>maximum {formatPublicationMetric(result.capacity.upload.publication.maximum)} · reliable {formatPublicationMetric(result.capacity.upload.publication.reliable)} · single stream {formatPublicationMetric(result.capacity.upload.publication.singleStream)} · {result.capacity.upload.selectedStreams} stream(s) · {formatBytes(result.capacity.upload.bytes)} total payload</td></tr>
             <tr><td className="mi__range">Upload requests</td><td>{formatBytes(result.upload.requestBytes)} adaptive payload · warm-up {result.upload.warmupSucceeded ? "completed" : "failed"}</td></tr>
             <tr><td className="mi__range">Raw evidence</td><td>{result.samples.length} measurement samples · {result.rawEvidence.streamDiagnostics.length} request diagnostics · {result.rawEvidence.events.length} typed events · {result.rawEvidence.phases.length} phase attempts · retained locally for the latest 20 completed runs</td></tr>
           </tbody>
@@ -238,4 +238,12 @@ export function MethodologyModal({
 
 function formatBytes(bytes: number): string {
   return bytes >= 1_000_000 ? `${(bytes / 1_000_000).toFixed(2)} MB` : `${Math.round(bytes / 1000)} kB`;
+}
+
+function formatPublicationMetric(
+  metric: TestResult["capacity"]["download"]["publication"]["maximum"],
+): string {
+  return metric.valueMbps === null
+    ? "measurement inconclusive"
+    : `${metric.valueMbps.toFixed(1)} Mbps (${metric.status.replace("-", " ")})`;
 }

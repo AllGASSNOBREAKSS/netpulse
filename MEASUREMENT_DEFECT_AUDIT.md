@@ -67,10 +67,10 @@ by the browser. Vercel is not a throughput proxy in the current architecture.
 | Displayed or retained metric | Source and formula | Classification | Production reliability |
 | --- | --- | --- | --- |
 | Maximum download capacity | Maximum duration-qualified ramp stage; `sum(application bytes) * 8 / shared stage ms / 1000` | Direct browser measurement | Real for the selected path; not globally certified |
-| Reliable download throughput | Median of the stable half of real 500 ms windows from the highest completed stage using at most four requests | Calculated from direct samples | Real, but limited when fewer than two windows exist |
+| Reliable download throughput | P25 of stable windows from the best qualified stage using at most four requests | Calculated from direct samples | Real when stage qualification passes; otherwise quick estimate or inconclusive |
 | Single-stream download | Shared-window rate from the one-request stage | Direct browser measurement | Request stream, not proof of one TCP/QUIC connection |
 | Maximum upload capacity | Successful/acknowledged application bytes over one shared stage window | Direct browser measurement | Provider receipt is used when exposed; otherwise client-success semantics |
-| Reliable upload throughput | Median of stable-half cumulative successful upload observations | Calculated from direct observations | Coarser than download because Fetch exposes no upload progress |
+| Reliable upload throughput | P25 of per-receipt stable observations from the best qualified upload stage using at most four requests | Calculated from direct observations | Real when receipt and stage qualification pass; otherwise quick estimate or inconclusive |
 | Idle latency | Median of sequential zero-byte HTTPS request durations | Direct browser measurement | Valid application RTT to selected endpoint; not ICMP |
 | Download-loaded latency | Median of lightweight HTTPS probes completed during download load | Direct browser measurement | Direction-specific and real |
 | Upload-loaded latency | Median of lightweight HTTPS probes completed during upload load | Direct browser measurement | Direction-specific and real |
@@ -209,3 +209,18 @@ controlled review, but NetPulse is **not approved for a global or gigabit
 accuracy claim**. Phase 2 should stabilize the browser engine and honesty gates
 against the normative specification. A dedicated test-node implementation
 should begin only after the protocol and discovery specifications are reviewed.
+
+## Phase 2 disposition
+
+The reliable-upload inversion came from comparing cumulative upload completion
+observations with a shared-window maximum from a different stage population.
+Phase 2 removes cumulative upload sampling, records per-receipt observations,
+and selects maximum P50, reliable P25, and single-stream P50 from one qualified
+stage pool. Duration, bytes, samples, variation, endpoint health, completion,
+cache, compression, content length, and receipt evidence now determine stage
+qualification. Remaining inversion after recalculation is inconclusive and
+recorded; no value is clamped or reordered.
+
+The deterministic 160-trial semantic matrix passed, but the Docker/tc/iperf3
+accuracy matrix remains blocked. See
+[PHASE_2_VALIDATION_REPORT.md](PHASE_2_VALIDATION_REPORT.md).

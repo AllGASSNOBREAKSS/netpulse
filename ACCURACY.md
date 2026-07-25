@@ -13,10 +13,15 @@ gates has passed merely because the documents or lab scaffolding exist.
 ## What is directly observed
 
 - Download application bytes delivered to JavaScript and monotonic phase time.
-- Upload application payload associated with successful HTTP POST responses and monotonic phase time. This is **successfully submitted payload**, not a cryptographic receipt of server-received bytes.
+- Upload application payload associated with successful HTTP POST responses,
+  server-received byte receipts when exposed, per-request browser duration, and
+  optional server receive duration. Cloudflare receipt identity remains
+  partial, not cryptographic proof.
 - Sequential HTTPS request timings for idle, download-loaded, and upload-loaded latency.
 - Family-specific IPv4/IPv6 HTTPS timings and browser/server transport facts when explicitly exposed.
-- Per-window download throughput, cumulative upload observations, failures, stop reasons, stream counts, phase timings, tab visibility, client-calibration facts, and endpoint probes.
+- Fixed-window download throughput, per-receipt upload throughput
+  observations, failures, stop reasons, stream counts, phase timings, tab
+  visibility, client-calibration facts, and endpoint probes.
 - Documented endpoint metadata and privacy-filtered trace fields when the source returns them.
 
 Unavailable values are omitted or labeled unavailable. In particular, the current public engine does not report a packet-loss percentage, exact location, Wi-Fi signal, router telemetry, or a silently substituted third-party measurement.
@@ -32,7 +37,13 @@ Unavailable values are omitted or labeled unavailable. In particular, the curren
 
 ## Confidence and the Accuracy Passport
 
-Confidence starts at 100, subtracts only evidence-backed penalties, and is clamped to 0–100. Current factors include download/upload sample count and variation, idle and loaded-latency sample counts, endpoint reachability/jitter/health/load, warm-up and minimum-duration completion, tab visibility, request/probe errors, backup availability, and client-calibration warnings. Every applied deduction is returned as a visible reason.
+Confidence starts at 100, subtracts only evidence-backed penalties, and is
+clamped to 0–100. Current factors include sample count and variation, idle and
+loaded-latency coverage, endpoint health/load, minimum-duration completion,
+tab visibility, request/probe errors, upload receipt completeness, stage
+qualification, semantic consistency, phase retries, backup availability, and
+client-calibration warnings. Low-data mode is capped at 65%; quick mode is
+capped at 55%. Every applied deduction is returned as a visible reason.
 
 Each completed result receives an Accuracy Passport containing its run ID, engine and methodology versions, sample and failure counts, endpoint selection, backup verification status, endpoint health/load, stream counts, transferred data, duration, IP-family comparison, transport telemetry, browser state, phase retries, limitations, and confidence reasons. A bounded secondary download records agreement or disagreement but never replaces or averages the primary result.
 
@@ -44,7 +55,14 @@ reliable confidence buckets and acceptable Brier score.
 
 ## Current evidence boundary
 
-The source suite validates formulas, state transitions, cancellation, endpoint ranking, privacy behavior, and controlled-result ingestion. This machine could not execute the Docker/netem/iperf3 matrix because its Docker engine is unavailable. Therefore no speed tier, browser family, native platform, or geographic region has passed the controlled accuracy gate in this session.
+The source suite validates formulas, state transitions, cancellation, endpoint
+ranking, privacy behavior, controlled-result ingestion, stage qualification,
+receipt disagreement, semantic invariants, and confidence sensitivity. A
+deterministic semantic harness executed 20 trials at each of eight speed tiers;
+it validates calculation behavior, not browser accuracy. This machine could not
+execute the Docker/netem/iperf3 matrix because its Docker engine is
+unavailable. Therefore no speed tier, browser family, native platform, or
+geographic region has passed the controlled accuracy gate in this session.
 
 Until the lab matrix is executed, NetPulse must not claim calibrated multi-gigabit accuracy, authoritative packet loss, validated regional coverage, or universal equivalence to Ookla, FAST.com, Cloudflare, M-Lab, or iperf3. Proposed tolerances in [METHODOLOGY.md](METHODOLOGY.md) are launch gates, not achieved results.
 

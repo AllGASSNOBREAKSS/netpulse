@@ -65,16 +65,16 @@ await mkdir(outputDirectory, { recursive: true });
 const outputPath = `${outputDirectory}/${safeFileName(runId)}.json`;
 await writeFile(outputPath, `${JSON.stringify(record, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
 process.stdout.write(`${JSON.stringify({ runId, status: record.outcome.status, outputPath })}\n`);
-if (record.outcome.status !== "complete") process.exitCode = 1;
+if (["failed", "aborted", "incomplete"].includes(record.outcome.status)) process.exitCode = 1;
 
 function completeRecord(captured, version) {
   const result = captured.result;
   if (!result) throw new Error("NetPulse completed without exposing a lab result.");
   const longTaskAvailable = captured.performance?.longTaskCount >= 0;
   return baseRecord(version, {
-    status: "complete",
-    downloadMbps: result.downloadMbps,
-    uploadMbps: result.uploadMbps,
+    status: result.publication.outcome,
+    downloadMbps: result.publication.download.valueMbps,
+    uploadMbps: result.publication.upload.valueMbps,
     idleLatencyMs: result.idlePingMs,
     jitterMs: result.idleJitterMs,
     bufferbloatDownMs: result.bufferbloat.downloadMs,
@@ -83,8 +83,8 @@ function completeRecord(captured, version) {
     timeToStableMs: result.download.multi.stableAtMs,
     durationMs: result.durationMs,
     dataTransferredBytes: Math.round(result.dataUsedMB * 1_000_000),
-    downloadFailed: false,
-    uploadFailed: false,
+    downloadFailed: result.publication.download.valueMbps === null,
+    uploadFailed: result.publication.upload.valueMbps === null,
     packetLossStatus: "unavailable",
     endpointHealthStatus: result.server.chosen.healthStatus,
     failureCode: null,

@@ -44,7 +44,9 @@ The endpoint also exposes `/v1/echo`, a bounded WebSocket application-message ec
   -JitterMs 10 -PacketLossPct 1 -QueuePackets 100
 ```
 
-`profiles.json` defines 1, 5, 10, 25, 50, 100, 500, 1,000, 2,500, and 5,000 Mbps tiers; 5, 20, 50, 100, 200, and 300 ms RTTs; plus jitter, loss, deep queues, and failure cases.
+`profiles.json` defines 1, 5, 10, 25, 50, 100, 300, 500, 1,000,
+2,500, and 5,000 Mbps tiers; 5, 20, 50, 100, 200, and 300 ms RTTs; plus
+jitter, loss, deep queues, and failure cases.
 
 ## Run matrices
 
@@ -57,12 +59,15 @@ Fast structural smoke:
 Full clean/jitter/loss/deep-queue matrix:
 
 ```powershell
-./lab/scripts/Run-NetPulseMatrix.ps1 -Matrix full -Repetitions 10 -Browsers chromium,firefox,webkit
+./lab/scripts/Run-NetPulseMatrix.ps1 -Matrix full -Repetitions 20 -Browsers chromium,firefox,webkit
 ```
 
 Each condition records reverse/forward iperf3 throughput, routed ping RTT/jitter, and ping under iperf3 download/upload saturation before NetPulse runs. Output retains failures, baseline inputs, time to stable, bytes, duration, confidence, long tasks, frame delay, heap where exposed, and unavailable reasons.
 
-`full` is intentionally expensive: 10 speed tiers × 6 RTTs × 4 impairment profiles × browsers × repetitions, plus baselines. Split it into scoped CI jobs before routine use. The script warns but does not certify multi-gigabit hardware.
+`full` is intentionally expensive: 11 speed tiers × 6 RTTs × 4 impairment
+profiles × browsers × repetitions, plus baselines. Split it into scoped CI
+jobs before routine use. The script warns but does not certify multi-gigabit
+hardware.
 
 ## Saturation and bufferbloat
 

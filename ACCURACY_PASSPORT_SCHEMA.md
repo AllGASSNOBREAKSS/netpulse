@@ -1,6 +1,6 @@
 # NetPulse Accuracy Passport schema
 
-Status: Phase 1 schema contract
+Status: Phase 2 schema contract
 Purpose: make each result inspectable and reproducible without exposing
 personal identifiers
 
@@ -22,7 +22,14 @@ type AccuracyPassportV1 = {
   schemaVersion: 1;
   runId: string;
   createdAt: string;
-  terminalStatus: "completed" | "low-confidence";
+  terminalStatus:
+    | "complete"
+    | "complete-with-limitations"
+    | "quick-estimate"
+    | "low-confidence"
+    | "inconclusive"
+    | "incomplete"
+    | "failed";
   engineVersion: string;
   methodologyVersion: string;
   profile: "full" | "lowData" | "quick";
@@ -126,10 +133,10 @@ fingerprinting identifiers are prohibited.
 
 ```ts
 type DirectionEvidence = {
-  status: "measured" | "limited";
-  maximumMbps: number;
-  reliableMbps: number;
-  singleStreamMbps: number;
+  status: "measured" | "quick-estimate" | "inconclusive";
+  maximumMbps: number | null;
+  reliableMbps: number | null;
+  singleStreamMbps: number | null;
   medianMbps: number;
   p5Mbps: number;
   p95Mbps: number;
@@ -149,10 +156,13 @@ type DirectionEvidence = {
 };
 
 type StageEvidence = {
+  stageId: string;
   streams: number;
   aggregateMbps: number;
   medianMbps: number;
+  trimmedMeanMbps: number;
   p5Mbps: number;
+  p50Mbps: number;
   p95Mbps: number;
   peakMbps: number;
   bytes: number;
@@ -160,6 +170,13 @@ type StageEvidence = {
   requestBytes: number;
   sampleCount: number;
   variationPct: number;
+  coefficientOfVariation: number;
+  rampState: "baseline" | "ramping" | "saturation" | "ceiling";
+  endpointHealth: "healthy" | "degraded" | "draining" | "unavailable" | "unknown";
+  qualification: {
+    status: "qualified" | "estimate-only" | "rejected";
+    reasons: string[];
+  };
   improvementPct: number | null;
   failedRequests: number;
   failedProbes: number;
@@ -302,8 +319,8 @@ The passport MUST NOT contain:
   "runId": "local-random-id",
   "createdAt": "2026-07-25T12:00:00.000Z",
   "terminalStatus": "low-confidence",
-  "engineVersion": "4.0.1-local",
-  "methodologyVersion": "2026.07.25-high-speed-capacity-local",
+  "engineVersion": "4.1.0",
+  "methodologyVersion": "2026.07.25-phase2-semantics-v1",
   "profile": "full",
   "endpoint": {
     "id": "cloudflare",

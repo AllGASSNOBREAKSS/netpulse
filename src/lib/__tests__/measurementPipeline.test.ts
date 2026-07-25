@@ -40,4 +40,33 @@ describe("MeasurementRunRecorder", () => {
     expect(recorder.phases[0]).toMatchObject({ phase: "preflight", attempt: 1, status: "completed" });
     expect(recorder.events.map((event) => event.kind)).toEqual(["phase-started", "phase-completed"]);
   });
+
+  it("retains phase retry evidence and increments the next attempt", () => {
+    const recorder = new MeasurementRunRecorder({
+      runId: "np-test",
+      startedAt: 1_000,
+      monotonicStart: performance.now(),
+    });
+    const first = recorder.begin("measuring-upload");
+    recorder.fail(first, new Error("receipt mismatch"));
+    recorder.retry("measuring-upload", new Error("receipt mismatch"));
+    const second = recorder.begin("measuring-upload");
+    recorder.complete(second);
+
+    expect(recorder.phases.map((phase) => phase.attempt)).toEqual([1, 2]);
+    expect(recorder.events.some((event) => event.kind === "phase-retry")).toBe(true);
+  });
+
+  it("records cancellation without converting it into a completed phase", () => {
+    const recorder = new MeasurementRunRecorder({
+      runId: "np-test",
+      startedAt: 1_000,
+      monotonicStart: performance.now(),
+    });
+    const token = recorder.begin("measuring-download");
+    recorder.fail(token, new DOMException("cancelled", "AbortError"), true);
+
+    expect(recorder.phases[0]).toMatchObject({ status: "cancelled", errorCode: "cancelled" });
+    expect(recorder.events.at(-1)?.kind).toBe("phase-failed");
+  });
 });

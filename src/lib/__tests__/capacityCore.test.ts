@@ -3,6 +3,7 @@ import { applicationMbps, capacityStageBudgetWeights, measureCapacity } from "..
 import type { CapacityPlan } from "../capacityProtocol";
 
 const plan: CapacityPlan = {
+  runId: "test-run",
   direction: "download",
   downloadUrlTemplate: "https://example.test/down?bytes={bytes}",
   uploadUrl: "https://example.test/up",
@@ -16,6 +17,14 @@ const plan: CapacityPlan = {
   stageMinMs: 500,
   stageMaxMs: 700,
   finalStageMinMs: 800,
+  stageMinBytes: 1,
+  minValidSamples: 1,
+  maxVariationPct: 100,
+  receiptTolerancePct: 0.5,
+  receiptToleranceBytes: 1,
+  profileMode: "full",
+  endpointHealth: "healthy",
+  allowEarlyStatisticalStop: false,
   improvementThresholdPct: 5,
   progressIntervalMs: 100,
   latencyProbeIntervalMs: 500,
@@ -32,7 +41,8 @@ describe("capacity measurement accounting", () => {
     const weights = capacityStageBudgetWeights(5);
     expect(weights).toEqual([0.03, 0.04, 0.18, 0.1, 0.65]);
     expect(weights.reduce((sum, value) => sum + value, 0)).toBeCloseTo(1);
-    expect(capacityStageBudgetWeights(3)).toEqual([1 / 3, 1 / 3, 1 / 3]);
+    expect(capacityStageBudgetWeights(3)).toEqual([0.15, 0.25, 0.6]);
+    expect(capacityStageBudgetWeights(2, "lowData")).toEqual([0.25, 0.75]);
   });
 
   it("records every configured ramp stage when short byte-capped stages cannot prove saturation", async () => {
@@ -83,7 +93,8 @@ describe("capacity measurement accounting", () => {
     try {
       const measured = await measureCapacity(uploadPlan, {}, new AbortController().signal);
       expect(measured.diagnostics.some((item) => item.serverAcceptedBytes === 1_000)).toBe(true);
-      expect(measured.reliable.sampleCount).toBeGreaterThanOrEqual(2);
+      expect(measured.reliable.sampleCount).toBeGreaterThanOrEqual(1);
+      expect(measured.reliable.status).toBe("quick-estimate");
       expect(measured.failedProbes).toBe(0);
       compressed = true;
       await expect(measureCapacity(uploadPlan, {}, new AbortController().signal)).rejects.toThrow(
