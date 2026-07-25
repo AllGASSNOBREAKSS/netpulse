@@ -36,6 +36,10 @@ export type MetricDef = {
 };
 
 const fmt = (n: number) => (n >= 100 ? String(Math.round(n)) : n.toFixed(1));
+const publishedValue = (r: Partial<TestResult>, direction: "download" | "upload") =>
+  r.publication?.[direction].valueMbps ?? null;
+const publicationPart = (label: string, value: number | null, status: string) =>
+  status === "inconclusive" || value === null ? `${label} inconclusive` : `${label} ${fmt(value)}`;
 
 const DL_PHASES = ["download_single", "download_multi"];
 const rttsOf = (r: TestResult, phases: string[]) =>
@@ -49,11 +53,18 @@ export const METRICS: MetricDef[] = [
     name: "Download speed",
     provenance: "measured",
     hotPhase: "download",
-    value: (r) => (r.downloadMbps !== undefined ? `${fmt(r.downloadMbps)} Mbps` : null),
+    value: (r) => {
+      const value = publishedValue(r, "download");
+      return value === null ? null : `${fmt(value)} Mbps`;
+    },
     sub: (r) =>
-      r.download ? `single ${fmt(r.download.single.mbps)} · multi ${fmt(r.download.multi.mbps)} Mbps` : null,
+      r.capacity ? [
+        publicationPart("maximum", r.capacity.download.publication.maximum.valueMbps, r.capacity.download.publication.maximum.status),
+        publicationPart("reliable", r.capacity.download.publication.reliable.valueMbps, r.capacity.download.publication.reliable.status),
+        publicationPart("single", r.capacity.download.publication.singleStream.valueMbps, r.capacity.download.publication.singleStream.status),
+      ].join(" · ") : null,
     what: "How much data your connection can pull down per second — the headline number ISPs advertise.",
-    how: "Two runs against the selected server: a single-connection run, then a multi-connection run (up to 4 parallel HTTPS streams; 2 in low-data mode). Each request is cache-busted and no-store. The reported rate is the application payload received divided by the phase's actual elapsed time. Timed download windows show variation but do not replace that byte/time result. Runs stop early once samples are steady, or at the duration/data cap.",
+    how: "A discarded warm-up transfer primes the route and sizes later requests. A Web Worker then tests 1 → 2 → 4 → 6 → 8 concurrent HTTPS requests in Full mode while throughput is improving. Requests are cache-busted and responses with compression are rejected. Maximum Capacity is the highest qualified fixed-window P50, Reliable Throughput is P25 of stable windows from the best qualified stage using at most four requests, and Single Stream is P50 from the dedicated one-request phase.",
     why: "Determines how fast pages, downloads, streams and updates arrive. The gap between single and multi connection speed hints at whether a single flow is being shaped. Past ~100 Mbps, responsiveness (latency) matters more than raw speed.",
     bands: [
       { range: "≥ 300 Mbps", label: "More than almost any household needs" },
@@ -64,13 +75,13 @@ export const METRICS: MetricDef[] = [
     ],
     action: (r) =>
       r.downloadMbps < 25
-        ? "Re-test over Ethernet next to the router. If it's still low, your plan or line is the limit — compare against what you're paying for."
+        ? "Re-test over Ethernet next to the router. If it remains low, compare with the plan rate and another endpoint; this run alone cannot distinguish local Wi-Fi, routing, plan, or access-line limits."
         : r.bufferbloatGrade >= "C"
           ? "Bandwidth is fine. If things still feel slow, the problem is latency under load (see Bufferbloat), not download speed."
           : "No action needed — this is plenty for everyday use.",
     samples: (r) => {
       const values = mbpsOf(r, DL_PHASES);
-      return values.length ? { values, unit: "Mbps", caption: "Timed throughput windows (~250 ms, plus the final partial window; single then multi connection)" } : null;
+      return values.length ? { values, unit: "Mbps", caption: "Worker capacity progress and real 500 ms throughput windows across the adaptive stream ramp" } : null;
     },
   },
   {
@@ -78,10 +89,18 @@ export const METRICS: MetricDef[] = [
     name: "Upload speed",
     provenance: "measured",
     hotPhase: "upload",
-    value: (r) => (r.uploadMbps !== undefined ? `${fmt(r.uploadMbps)} Mbps` : null),
-    sub: (r) => (r.upload ? `${r.upload.samples.length} accepted-payload observations` : null),
+    value: (r) => {
+      const value = publishedValue(r, "upload");
+      return value === null ? null : `${fmt(value)} Mbps`;
+    },
+    sub: (r) =>
+      r.capacity ? [
+        publicationPart("maximum", r.capacity.upload.publication.maximum.valueMbps, r.capacity.upload.publication.maximum.status),
+        publicationPart("reliable", r.capacity.upload.publication.reliable.valueMbps, r.capacity.upload.publication.reliable.status),
+        publicationPart("single", r.capacity.upload.publication.singleStream.valueMbps, r.capacity.upload.publication.singleStream.status),
+      ].join(" · ") : null,
     what: "How much data your connection can push out per second.",
-    how: "Parallel HTTPS POST streams (3, or 1 in low-data mode) send non-compressible in-memory payloads for up to 8 seconds. The reported rate is payload accepted by the server divided by the phase's actual elapsed time. Fetch does not expose byte-level upload progress, so live observations update only when a POST is accepted and no unsupported upload peak is claimed.",
+    how: "A discarded generated-payload warm-up primes the route. Before each timed stage, the Web Worker creates one non-personal, incompressible body and reuses it across a 1 → 2 → 4 request ramp so random-byte generation cannot depress the timed network result on mobile hardware. A completed request counts the provider's allowlisted received-byte receipt when exposed; otherwise it counts the successfully submitted application payload. Fetch still exposes neither byte-level upload progress nor wire overhead.",
     why: "Video calls, livestreaming, cloud backups and sending files all depend on upload. Many cable plans are heavily asymmetric — a fraction of the download figure.",
     bands: [
       { range: "≥ 50 Mbps", label: "Excellent — streaming and backups without thinking" },
@@ -94,8 +113,8 @@ export const METRICS: MetricDef[] = [
         ? "Check the upload speed your plan actually promises — asymmetric plans are common, and this may be all you're paying for."
         : "Healthy. If calls still stutter while uploading, look at Upload-loaded latency instead.",
     samples: (r) => {
-      const values = mbpsOf(r, ["upload"]);
-      return values.length ? { values, unit: "Mbps", caption: "Timed throughput windows (~250 ms, plus the final partial window) during upload" } : null;
+      const values = r.upload.samples;
+      return values.length ? { values, unit: "Mbps", caption: "Cumulative successfully submitted payload observations; Fetch exposes neither byte-level upload windows nor a server-received byte receipt" } : null;
     },
   },
   {
@@ -104,7 +123,7 @@ export const METRICS: MetricDef[] = [
     provenance: "measured",
     hotPhase: "latency",
     value: (r) => (r.idlePingMs !== undefined ? `${Math.round(r.idlePingMs)} ms` : null),
-    sub: (r) => (r.idleLatency ? `p95 ${Math.round(r.idleLatency.p95)} · min ${Math.round(r.idleLatency.min)} ms` : null),
+    sub: (r) => (r.idleLatency ? `p95 ${Math.round(r.idleLatency.p95)} · min ${Math.round(r.idleLatency.min)} ms · n=${r.idleLatency.count}` : null),
     what: "The round-trip time to the test server while your connection is quiet — the floor for how responsive anything can feel.",
     how: "14 timed zero-byte HTTPS requests (10 in low-data mode) to the selected server before any load, timed with performance.now() (monotonic, sub-ms). The result is the median; min/mean/p95/p99/jitter are also computed. HTTP round-trips run slightly higher than raw ICMP ping.",
     why: "Every click, keystroke in a remote session, and game action pays this cost at minimum. No amount of bandwidth compensates for high base latency.",
@@ -112,11 +131,11 @@ export const METRICS: MetricDef[] = [
       { range: "< 20 ms", label: "Excellent — competitive-gaming territory" },
       { range: "20–50 ms", label: "Good — nothing will feel laggy" },
       { range: "50–100 ms", label: "Noticeable in fast games and remote desktops" },
-      { range: "≥ 100 ms", label: "Poor — likely VPN, satellite, congestion or a distant route" },
+      { range: "≥ 100 ms", label: "Poor — consistent with a distant route, VPN, or high-latency access path" },
     ],
     action: (r) =>
       r.idlePingMs > 60
-        ? "Check whether a VPN is active, and re-test on Ethernet. DSL and satellite links set a latency floor no router setting can fix."
+        ? "If a VPN is active, compare one run without it and one over Ethernet. The browser cannot identify the access technology or exact cause."
         : "Healthy base latency — nothing to do here.",
     samples: (r) => {
       const values = rttsOf(r, ["latency"]);
@@ -131,7 +150,7 @@ export const METRICS: MetricDef[] = [
     value: (r) => (r.loadedDownPingMs !== undefined ? `${Math.round(r.loadedDownPingMs)} ms` : null),
     sub: (r) =>
       r.loadedDownPingMs !== undefined && r.idlePingMs !== undefined
-        ? `+${Math.max(0, Math.round(r.loadedDownPingMs - r.idlePingMs))} ms vs idle`
+        ? `+${Math.max(0, Math.round(r.loadedDownPingMs - r.idlePingMs))} ms vs idle${r.loadedDown ? ` · n=${r.loadedDown.count}` : ""}`
         : null,
     what: "Your latency while the connection is busy downloading — game updates, streams, cloud sync.",
     how: "While the download streams saturate the line, a zero-byte probe runs every ~500 ms. The result is the median of those probes.",
@@ -144,7 +163,7 @@ export const METRICS: MetricDef[] = [
     ],
     action: (r) =>
       r.loadedDownPingMs - r.idlePingMs > 60
-        ? "Enable SQM / Smart Queue Management (or QoS) on your router — it directly targets latency under load."
+        ? "Test SQM / Smart Queue Management if your router supports it, then re-run. The measured rise is consistent with queueing, but this browser cannot locate the queue."
         : "Latency holds up under download load — good router queue behavior.",
     samples: (r) => {
       const values = rttsOf(r, DL_PHASES);
@@ -159,7 +178,7 @@ export const METRICS: MetricDef[] = [
     value: (r) => (r.loadedUpPingMs !== undefined ? `${Math.round(r.loadedUpPingMs)} ms` : null),
     sub: (r) =>
       r.loadedUpPingMs !== undefined && r.idlePingMs !== undefined
-        ? `+${Math.max(0, Math.round(r.loadedUpPingMs - r.idlePingMs))} ms vs idle`
+        ? `+${Math.max(0, Math.round(r.loadedUpPingMs - r.idlePingMs))} ms vs idle${r.loadedUp ? ` · n=${r.loadedUp.count}` : ""}`
         : null,
     what: "Your latency while the connection is busy uploading — backups, file sends, streaming out.",
     how: "While the upload streams saturate the line, a zero-byte probe runs every ~500 ms. The result is the median of those probes.",
@@ -172,7 +191,7 @@ export const METRICS: MetricDef[] = [
     ],
     action: (r) =>
       r.loadedUpPingMs - r.idlePingMs > 60
-        ? "Enable SQM/QoS on the router, or cap background upload tools (cloud backup, sync) to ~80% of your measured upload speed."
+        ? "Test SQM/QoS if available, or temporarily cap a background uploader near 80% of this measured rate and re-run to see whether loaded latency falls."
         : "Latency holds up under upload load — nothing to fix.",
     samples: (r) => {
       const values = rttsOf(r, ["upload"]);
@@ -192,11 +211,11 @@ export const METRICS: MetricDef[] = [
       { range: "< 5 ms", label: "Rock steady" },
       { range: "5–15 ms", label: "Fine for calls and gaming" },
       { range: "15–30 ms", label: "Shaky — occasional glitches in real-time apps" },
-      { range: "≥ 30 ms", label: "Unstable — usually Wi-Fi interference or congestion" },
+      { range: "≥ 30 ms", label: "Unstable — local-link or route investigation warranted" },
     ],
     action: (r) =>
       r.idleJitterMs > 15
-        ? "On Wi-Fi, jitter this high usually means interference or weak signal — re-test next to the router or on Ethernet to isolate it."
+        ? "Possible local-link or route instability: compare Ethernet and Wi-Fi runs. The browser cannot identify interference or signal strength."
         : "Latency is consistent — good for calls and gaming.",
     samples: (r) => {
       const values = rttsOf(r, ["latency"]);
@@ -238,7 +257,7 @@ export const METRICS: MetricDef[] = [
       r.bufferbloat ? `down ${r.bufferbloat.downloadGrade} · up ${r.bufferbloat.uploadGrade}` : null,
     what: "How much your latency rises when the connection is fully busy — the single best predictor of a connection that 'feels slow despite fast speeds'.",
     how: "Measured, not guessed: for download and upload separately, the loaded-latency median minus the idle median. Graded A (<30 ms rise) to F (≥200 ms); the overall grade is the worse of the two.",
-    why: "Oversized router buffers queue packets instead of pacing them. Grade C or worse means gaming, calls and browsing all degrade whenever anyone on the network downloads or uploads.",
+    why: "Queues in a router, modem, access network, or provider path can hold packets instead of pacing them. Grade C or worse means this test observed responsiveness degradation during saturation; it does not identify which device owns the queue.",
     bands: [
       { range: "A — rise < 30 ms", label: "No meaningful bloat" },
       { range: "B — 30–60 ms", label: "Minor, rarely noticeable" },
@@ -248,7 +267,7 @@ export const METRICS: MetricDef[] = [
     ],
     action: (r) =>
       r.bufferbloatGrade >= "C"
-        ? "Enable SQM (CAKE / fq_codel) or Smart Queue on your router — it's the direct fix. A faster plan will NOT fix bufferbloat."
+        ? "If supported, test SQM (CAKE / fq_codel) or Smart Queue and re-run. A faster tier alone is not evidence that queueing will improve."
         : "Your router queues traffic well — latency stays controlled under load.",
     samples: (r) => {
       const values = [...rttsOf(r, DL_PHASES), ...rttsOf(r, ["upload"])];
@@ -262,10 +281,10 @@ export const METRICS: MetricDef[] = [
     value: (r) => (r.stability ? `${r.stability.score}/100` : null),
     sub: (r) =>
       r.stability
-        ? `${r.stability.spikes} spike${r.stability.spikes === 1 ? "" : "s"} · σ ${r.stability.latencyStddevMs} ms`
+        ? `${r.stability.spikes} spike${r.stability.spikes === 1 ? "" : "s"} · σ ${r.stability.latencyStddevMs} ms · ${(r.stability.completeness * 100).toFixed(0)}% probes`
         : null,
     what: "A 0–100 score for how steady latency stayed during load — averages hide brief dropouts, this doesn't.",
-    how: "Combines the standard deviation of all loaded-latency probes, the spike count (probes above 3× idle or idle+150 ms), and the worse of download/upload throughput variation into one score. Also reports p95/p99 latency and the longest spike.",
+    how: "Starts at 100 and subtracts weighted penalties for loaded-latency spread (30%), spike ratio (30%), worse download/upload throughput variation (20%), failed probes or requests (15%), and test completion (5%). A spike exceeds the larger of 3× idle or idle+150 ms. P95, P99, longest spike, and probe completeness remain visible.",
     why: "A connection that spikes for two seconds every minute ruins calls and games while still posting good headline numbers.",
     bands: [
       { range: "85–100", label: "Steady throughout" },
@@ -304,7 +323,7 @@ export const METRICS: MetricDef[] = [
     provenance: "measured",
     value: (r) => (r.dataUsedMB !== undefined ? `${r.dataUsedMB.toFixed(0)} MB` : null),
     what: "The application payload NetPulse observed during this test.",
-    how: "Counted byte-by-byte from download stream readers and from upload bodies after the server accepted each request. Browser APIs do not expose protocol overhead or the portion of an upload aborted mid-request, so this is measured payload, not exact on-wire usage.",
+    how: "Counted byte-by-byte from download stream readers and from upload bodies after each successful HTTP response. Unless an endpoint returns a verified received-byte receipt, upload is successfully submitted payload. Browser APIs do not expose protocol overhead or the portion of an upload aborted mid-request, so this is measured application payload, not exact on-wire usage.",
     why: "Speed tests are data-hungry. On metered or capped connections this matters — that's why low-data mode exists.",
     bands: [
       { range: "100–350 MB", label: "Typical full test (scales with your speed)" },

@@ -25,30 +25,29 @@ html, body {
    dimensions, typography and tick spacing are structural, not a coincidence
    two blocks of CSS have to keep agreeing on. Sizing is fluid: the SVG is
    viewBox-driven and the container is width-constrained only. */
-.np-gauge { position: relative; width: 100%; max-width: 340px; margin: 0 auto; }
+.np-gauge { position: relative; width: 100%; max-width: 380px; margin: 0 auto; color: var(--speed-color); }
 .np-gauge__svg { display: block; width: 100%; height: auto; overflow: visible; }
 .np-gauge__track { fill: none; stroke: color-mix(in oklab, var(--border) 80%, transparent); stroke-width: 10; }
-.np-gauge__ring { fill: none; stroke: color-mix(in oklab, var(--foreground) 22%, transparent); stroke-width: 1.2; }
-.np-gauge__sweep { fill: none; stroke-width: 10; stroke-linecap: butt; }
-.np-gauge__cap { fill: var(--primary); }
-.np-gauge__needle { stroke: var(--foreground); stroke-width: 2.2; stroke-linecap: round; }
-.np-gauge__hub { fill: color-mix(in oklab, var(--foreground) 70%, transparent); }
+.np-gauge__band { fill: none; stroke-width: 2.4; opacity: 0.55; }
+.np-gauge__band--blue { stroke: var(--speed-blue); }
+.np-gauge__band--yellow { stroke: var(--speed-yellow); }
+.np-gauge__band--orange { stroke: var(--speed-orange); }
+.np-gauge__band--red { stroke: var(--speed-red); }
+.np-gauge__sweep { fill: none; stroke: var(--speed-color); stroke-width: 10; stroke-linecap: butt; }
+.np-gauge__cap { fill: var(--speed-color); }
+.np-gauge__needle { stroke: var(--speed-color); stroke-width: 2.4; stroke-linecap: round; }
 
 /* Tick activation is driven by the same fraction as the needle. */
 .np-gauge__tick,
 .np-gauge__tick--major {
   stroke: color-mix(in oklab, var(--foreground) 22%, transparent);
-  transition: stroke 180ms ease;
 }
 .np-gauge__tick { stroke-width: 1.3; }
 .np-gauge__tick--major { stroke-width: 2; stroke: color-mix(in oklab, var(--foreground) 42%, transparent); }
 .np-gauge__tick[data-on],
-.np-gauge__tick--major[data-on] { stroke: var(--primary); }
+.np-gauge__tick--major[data-on] { stroke: var(--speed-color); }
 
-.np-gauge__scale { position: absolute; font-family: var(--mono); font-size: 11px; color: var(--np-muted); font-variant-numeric: tabular-nums; }
-.np-gauge__scale--zero { left: 15%; bottom: 10%; }
-.np-gauge__scale--mid { top: 2.5%; left: 50%; transform: translateX(-50%); }
-.np-gauge__scale--max { right: 13%; bottom: 10%; }
+.np-gauge__scale { fill: var(--np-muted); font-family: var(--mono); font-size: 5px; font-variant-numeric: tabular-nums; }
 .np-gauge__center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; pointer-events: none; }
 .np-gauge__label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--np-muted); }
 .np-gauge__value {
@@ -57,9 +56,8 @@ html, body {
   font-size: clamp(36px, 7.5vw, 52px);
   line-height: 1;
   letter-spacing: -0.035em;
-  color: var(--text);
+  color: var(--speed-color);
   font-variant-numeric: tabular-nums;
-  transition: color 240ms ease;
 }
 .np-gauge__value[data-idle] { color: var(--np-muted); }
 .np-gauge__unit { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.3em; color: var(--np-muted); }
@@ -637,3 +635,197 @@ html, body {
 }
 :root:not(.dark) .site-noise { mix-blend-mode: multiply; opacity: 0.28; }
 @media (max-width: 640px) { .site-noise { opacity: 0.3; } }
+
+/* Measurement workspaces -------------------------------------------------- */
+.blackbox-page,
+.area-pulse-page,
+.plan-reality,
+.section-stack {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.blackbox-hero,
+.area-pulse-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(260px, 0.55fr);
+  gap: 24px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 4px);
+  background: linear-gradient(125deg, color-mix(in oklab, var(--primary) 13%, transparent), transparent 55%), var(--card);
+  padding: clamp(24px, 4vw, 48px);
+}
+.blackbox-hero h2,
+.area-pulse-hero h2 {
+  margin-top: 10px;
+  font-family: var(--display);
+  font-size: clamp(40px, 7vw, 88px);
+  font-style: italic;
+  line-height: .9;
+  letter-spacing: -.05em;
+  text-transform: uppercase;
+}
+.blackbox-hero p,
+.area-pulse-hero p {
+  margin-top: 18px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 1.65;
+}
+.blackbox-hero__trust,
+.area-pulse-notice {
+  align-self: end;
+  display: grid;
+  gap: 8px;
+  border: 1px solid color-mix(in oklab, var(--success) 35%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in oklab, var(--success) 7%, var(--card));
+  padding: 16px;
+}
+.blackbox-hero__trust svg,
+.area-pulse-notice > svg { width: 22px; color: var(--success); }
+.blackbox-hero__trust span,
+.area-pulse-notice p { color: var(--muted-foreground); font-size: 10px; line-height: 1.55; }
+.area-pulse-notice { grid-template-columns: auto 1fr; align-self: stretch; border-color: color-mix(in oklab, var(--warning) 42%, var(--border)); background: color-mix(in oklab, var(--warning) 8%, var(--card)); }
+.area-pulse-notice > svg { color: var(--warning); }
+.area-pulse-notice--success { border-color: color-mix(in oklab, var(--success) 42%, var(--border)); background: color-mix(in oklab, var(--success) 8%, var(--card)); }
+.area-pulse-notice--success > svg { color: var(--success); }
+
+.monitor-mode-grid,
+.capability-grid,
+.report-action-grid,
+.area-status-grid,
+.plan-stat-grid,
+.plan-comparison-grid,
+.evidence-rules { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.area-status-grid,
+.plan-stat-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.monitor-mode-card,
+.capability-grid > div,
+.confidence-factor-grid > div,
+.blackbox-stat-grid > div,
+.plan-comparison-grid > div {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--muted);
+}
+.monitor-mode-card dl,
+.confidence-factor-grid,
+.lag-analysis-list,
+.reachability-list,
+.incident-list,
+.saved-report-list,
+.method-list { display: grid; gap: 10px; }
+.monitor-mode-card dl > div { display: flex; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+.monitor-mode-card dt,
+.blackbox-stat-grid span,
+.area-status span,
+.plan-stat-grid span,
+.plan-comparison-grid span,
+.field-stack > span { color: var(--muted-foreground); font-size: 8px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.monitor-mode-card dd,
+.blackbox-stat-grid strong,
+.area-incident__score,
+.plan-stat-grid strong,
+.plan-comparison-grid strong { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.capability-grid > div { display: grid; grid-template-columns: auto 1fr; gap: 10px; padding: 13px; }
+.capability-grid p,
+.chart-text-summary,
+.empty-copy,
+.area-status p,
+.plan-stat-grid p,
+.plan-comparison-grid p { color: var(--muted-foreground); font-size: 9px; line-height: 1.5; }
+.retention-control,
+.session-command-card__actions,
+.area-pulse-hero__actions,
+.chart-window-controls,
+.incident-sources { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.retention-control { justify-content: space-between; }
+.session-command-card [data-slot="card-header"] { display: flex; flex-direction: row; justify-content: space-between; gap: 16px; align-items: start; }
+.felt-lag-button { min-height: 88px; width: 100%; background: linear-gradient(115deg, var(--warning), var(--primary)); color: var(--primary-foreground); }
+.blackbox-warning,
+.incident-attribution-note { border: 1px solid color-mix(in oklab, var(--warning) 40%, var(--border)); border-radius: var(--radius); background: color-mix(in oklab, var(--warning) 7%, var(--card)); padding: 12px 14px; }
+.blackbox-warning { display: flex; gap: 10px; align-items: center; }
+.blackbox-stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; }
+.blackbox-stat-grid > div,
+.confidence-factor-grid > div,
+.plan-comparison-grid > div { padding: 13px; }
+.blackbox-stat-grid strong { display: block; margin-top: 6px; overflow-wrap: anywhere; font-size: clamp(14px, 2vw, 22px); }
+.confidence-factor-grid,
+.blackbox-two-column,
+.area-pulse-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.blackbox-chart { width: 100%; height: 330px; aspect-ratio: auto; }
+.raw-table-wrap { max-height: 560px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+.raw-table-wrap th { position: sticky; z-index: 1; top: 0; background: var(--card); }
+.raw-table-wrap td { font-family: var(--mono); font-size: 8px; white-space: nowrap; }
+.incident-detail { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; }
+.lag-analysis-list article,
+.area-incident,
+.area-empty { border: 1px solid var(--border); border-radius: var(--radius); background: var(--muted); padding: 14px; }
+.lag-analysis-list article { display: grid; grid-template-columns: auto 1fr; gap: 11px; }
+
+.area-pulse-hero { display: flex; align-items: end; justify-content: space-between; }
+.area-status [data-slot="card-content"] { display: grid; grid-template-columns: auto 1fr; gap: 12px; padding: 16px; }
+.area-status svg { width: 19px; color: var(--primary); }
+.reachability-list > div { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--muted); padding: 12px; }
+.evidence-dot { width: 8px; height: 8px; margin-top: 5px; border-radius: 50%; background: var(--muted-foreground); }
+.evidence-dot--reachable { background: var(--success); }
+.evidence-dot--failed { background: var(--destructive); }
+.evidence-rules > div { border: 1px solid var(--border); border-radius: var(--radius); background: var(--muted); padding: 13px; }
+.area-empty { display: flex; gap: 12px; }
+.area-incident { display: grid; gap: 14px; }
+.area-incident__head { display: flex; justify-content: space-between; gap: 16px; }
+.area-incident dl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.area-report-form,
+.field-stack { display: grid; gap: 7px; }
+.area-report-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.consent-row { display: grid; grid-template-columns: auto 1fr; gap: 9px; color: var(--muted-foreground); font-size: 9px; line-height: 1.5; }
+.form-error { color: var(--destructive); font-size: 9px; }
+.saved-report-list > div,
+.plan-test-list > div { display: flex; justify-content: space-between; gap: 12px; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 9px; }
+.plan-reality-hero [data-slot="card-title"] { font-family: var(--display); font-size: clamp(30px, 5vw, 58px); font-style: italic; text-transform: uppercase; }
+.plan-profile-form { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 11px; align-items: end; }
+.plan-method { display: grid; grid-template-columns: auto 1fr auto; gap: 11px; align-items: start; }
+
+@media (max-width: 1100px) {
+  .monitor-mode-grid,
+  .capability-grid,
+  .area-status-grid,
+  .plan-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .plan-profile-form { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .blackbox-hero { grid-template-columns: 1fr; }
+  .area-pulse-hero { align-items: stretch; flex-direction: column; }
+  .monitor-mode-grid,
+  .capability-grid,
+  .confidence-factor-grid,
+  .blackbox-two-column,
+  .area-pulse-columns,
+  .plan-comparison-grid { grid-template-columns: 1fr; }
+  .session-command-card [data-slot="card-header"] { flex-direction: column; }
+  .session-command-card__actions,
+  .area-pulse-hero__actions,
+  .area-pulse-hero__actions button { width: 100%; }
+  .blackbox-stat-grid,
+  .area-incident dl,
+  .plan-profile-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .report-action-grid,
+  .incident-detail { grid-template-columns: 1fr; }
+  .blackbox-chart { height: 270px; }
+}
+@media (max-width: 500px) {
+  .area-status-grid,
+  .plan-stat-grid,
+  .area-report-grid,
+  .area-incident dl,
+  .plan-profile-form,
+  .blackbox-stat-grid,
+  .evidence-rules { grid-template-columns: 1fr; }
+  .saved-report-list > div,
+  .plan-test-list > div { align-items: stretch; flex-direction: column; }
+}

@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "revision": "2026-07-21-cloudflare-fallback-v1",
+  "publishedAt": "2026-07-21T00:00:00.000Z",
+  "coverage": [
+    { "id": "us-east", "label": "US East", "status": "planned", "note": "Pilot wave 1; no NetPulse-operated endpoint is deployed or supported in this region yet." },
+    { "id": "us-central", "label": "US Central", "status": "planned", "note": "Expansion wave 2; no NetPulse-operated endpoint is deployed or supported in this region yet." },
+    { "id": "us-west", "label": "US West", "status": "planned", "note": "Expansion wave 2; no NetPulse-operated endpoint is deployed or supported in this region yet." },
+    { "id": "canada", "label": "Canada", "status": "planned", "note": "Expansion wave 3; no NetPulse-operated endpoint is deployed or supported in this region yet." },
+    { "id": "brazil", "label": "Brazil", "status": "planned", "note": "Expansion wave 3; no NetPulse-operated endpoint is deployed or supported in this region yet." },
+    { "id": "united-kingdom", "label": "United Kingdom", "status": "planned", "note": "Expansion wave 2; no NetPulse-operated endpoint is deployed or supported in this region yet." },
+    { "id": "western-europe", "label": "Western Europe", "status": "planned", "note": "Pilot wave 1; no NetPulse-operated endpoint is deployed or supported in this region yet." },
+    { "id": "eastern-europe", "label": "Eastern Europe", "status": "planned", "note": "Expansion wave 3; no NetPulse-operated endpoint is deployed or supported in this region yet." },
+    { "id": "middle-east", "label": "Middle East", "status": "planned", "note": "Expansion wave 3; no NetPulse-operated endpoint is deployed or supported in this region yet." },
+    { "id": "india", "label": "India", "status": "planned", "note": "Expansion wave 2; no NetPulse-operated endpoint is deployed or supported in this region yet." },
+    { "id": "southeast-asia", "label": "Southeast Asia", "status": "planned", "note": "Pilot wave 1; no NetPulse-operated endpoint is deployed or supported in this region yet." },
+    { "id": "japan", "label": "Japan", "status": "planned", "note": "Expansion wave 2; no NetPulse-operated endpoint is deployed or supported in this region yet." },
+    { "id": "south-korea", "label": "South Korea", "status": "planned", "note": "Expansion wave 3; no NetPulse-operated endpoint is deployed or supported in this region yet." },
+    { "id": "australia", "label": "Australia", "status": "planned", "note": "Pilot wave 1; no NetPulse-operated endpoint is deployed or supported in this region yet." },
+    { "id": "africa", "label": "Africa", "status": "planned", "note": "Expansion wave 3; location depends on measured demand and peering. No NetPulse-operated endpoint is deployed or supported in this region yet." }
+  ],
+  "endpoints": [
+    {
+      "id": "cloudflare",
+      "provider": "Cloudflare",
+      "regionId": "global-anycast",
+      "regionLabel": "Global anycast (provider routed)",
+      "city": null,
+      "countryCode": null,
+      "status": "active",
+      "protocol": "HTTPS fetch via Cloudflare anycast",
+      "protocolVersion": null,
+      "downloadUrlTemplate": "https://speed.cloudflare.com/__down?bytes={bytes}",
+      "uploadUrl": "https://speed.cloudflare.com/__up",
+      "latencyUrl": "https://speed.cloudflare.com/__down?bytes=0",
+      "traceUrl": "https://speed.cloudflare.com/cdn-cgi/trace",
+      "healthUrl": null,
+      "echoUrl": null,
+      "capabilities": {
+        "download": true,
+        "upload": true,
+        "latency": true,
+        "echo": false,
+        "ipv4": true,
+        "ipv6": true,
+        "health": false,
+        "capacity": false,
+        "version": false
+      }
+    }
+  ]
+}

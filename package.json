@@ -12,14 +12,20 @@
     "preview": "vite preview --port 5178",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "npm run typecheck && npm run lint && npm test && npm run build"
+    "docs:links": "node scripts/validate-markdown-links.mjs",
+    "lab:dashboard": "vite --port 5178 --host 127.0.0.1",
+    "check": "npm run typecheck && npm run lint && npm test && npm run docs:links && npm run build"
   },
   "dependencies": {
+    "@arclux/arc-ui": "^2.2.0",
     "@astryxdesign/core": "^0.1.6",
     "@astryxdesign/theme-neutral": "^0.1.6",
+    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/space-grotesk": "^5.3.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.25.0",
+    "postgres": "^3.4.9",
     "radix-ui": "^1.6.2",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

@@ -14,8 +14,13 @@ function probe(
   return {
     id,
     provider: id,
+    regionId: id,
+    regionLabel: id,
     edgeCode: null,
     clientCountryCode: null,
+    city: null,
+    region: null,
+    approximateDistanceKm: null,
     protocol: "HTTPS",
     ipFamily,
     latency: summarize(rtts),
@@ -24,6 +29,14 @@ function probe(
     failed,
     availability: attempted > 0 ? rtts.length / attempted : 0,
     rank: 0,
+    routeConsistency: rtts.length > 0 ? 0.95 : 0,
+    healthStatus: "healthy",
+    loadPct: 20,
+    capacityMbps: 10_000,
+    availableCapacityMbps: 8_000,
+    serverVersion: "1.0.0",
+    protocolVersion: 1,
+    healthReason: "Test fixture",
   };
 }
 
@@ -61,5 +74,20 @@ describe("server ranking", () => {
     ]);
     expect(ranked[0].id).toBe("reliable");
     expect(ranked[0].rank).toBeGreaterThan(ranked[1].rank);
+  });
+
+  it("does not prefer an overloaded endpoint over a similarly routed healthy endpoint", () => {
+    const overloaded = { ...probe("overloaded", [18, 19, 18]), loadPct: 98, availableCapacityMbps: 20, healthStatus: "degraded" as const };
+    const healthy = { ...probe("healthy", [20, 20, 21]), loadPct: 20, availableCapacityMbps: 8_000 };
+    const ranked = rankProbes([overloaded, healthy]);
+    expect(ranked[0].id).toBe("healthy");
+  });
+
+  it("removes an endpoint that failed health or compatibility checks", () => {
+    const incompatible = { ...probe("incompatible", [8, 8, 9]), available: false, healthStatus: "unavailable" as const };
+    const compatible = probe("compatible", [30, 31, 29]);
+    const ranked = rankProbes([incompatible, compatible]);
+    expect(ranked[0].id).toBe("compatible");
+    expect(ranked.find((item) => item.id === "incompatible")?.rank).toBe(0);
   });
 });

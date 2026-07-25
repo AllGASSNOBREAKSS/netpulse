@@ -1,0 +1,118 @@
+name: netpulse-validation-lab
+
+services:
+  endpoint:
+    build:
+      context: ./endpoint
+    environment:
+      NETPULSE_MAX_CONCURRENT_TESTS: "32"
+      NETPULSE_MAX_DOWNLOAD_BYTES: "268435456"
+      NETPULSE_MAX_UPLOAD_BYTES: "67108864"
+    expose:
+      - "8080"
+      - "5201"
+      - "9000/udp"
+    networks:
+      server_net:
+        ipv4_address: 172.30.0.10
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "node", "healthcheck.mjs"]
+      interval: 5s
+      timeout: 2s
+      retries: 12
+
+  shaper:
+    build:
+      context: ./shaper
+    environment:
+      ENDPOINT_HOST: 172.30.0.10
+      DEFAULT_DOWNLOAD_MBPS: "100"
+      DEFAULT_UPLOAD_MBPS: "20"
+      DEFAULT_RTT_MS: "20"
+      DEFAULT_JITTER_MS: "0"
+      DEFAULT_LOSS_PCT: "0"
+      DEFAULT_QUEUE_PACKETS: "1000"
+    cap_add:
+      - NET_ADMIN
+    networks:
+      client_net:
+        ipv4_address: 172.29.0.2
+      server_net:
+        ipv4_address: 172.30.0.2
+    ports:
+      - "127.0.0.1:8088:8080"
+      - "127.0.0.1:5201:5201"
+    depends_on:
+      endpoint:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/v1/health"]
+      interval: 5s
+      timeout: 2s
+      retries: 12
+
+  app:
+    build:
+      context: ..
+      dockerfile: lab/app/Dockerfile
+    environment:
+      VITE_NETPULSE_LAB_MODE: "true"
+      VITE_NETPULSE_ENDPOINT_MANIFEST_URL: "http://shaper:8080/directory.json"
+    expose:
+      - "5178"
+    networks:
+      - client_net
+    depends_on:
+      shaper:
+        condition: service_healthy
+
+  runner:
+    build:
+      context: ./runner
+    environment:
+      NETPULSE_LAB_URL: "http://app:5178"
+      NETPULSE_LAB_RESULTS_DIR: "/results"
+    init: true
+    ipc: host
+    networks:
+      - client_net
+    volumes:
+      - ./results:/results
+    depends_on:
+      app:
+        condition: service_started
+    profiles: ["runner"]
+
+  baseline:
+    build:
+      context: ./baseline
+    cap_add:
+      - NET_ADMIN
+    networks:
+      - client_net
+    profiles: ["runner"]
+
+  saturator:
+    image: networkstatic/iperf3:3.19.1
+    networks:
+      - client_net
+    profiles: ["runner"]
+
+networks:
+  client_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.29.0.0/24
+  server_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24

@@ -1,0 +1,10 @@
+.git
+.github
+dist
+node_modules
+lab/results/*
+!.gitignore
+npm-debug.log*
+.env
+.env.*
+!.env.example
