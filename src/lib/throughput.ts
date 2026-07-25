@@ -8,7 +8,7 @@ import { DOWNLOAD_WARMUP_BYTES, UPLOAD_WARMUP_BYTES } from "./profiles";
 import { coefficientOfVariation, max, median, percentile } from "./stats";
 import { pingOnce } from "./latency";
 import { linkAbortSignal, MeasurementCancelledError, throwIfCancelled } from "./cancellation";
-import type { ThroughputStats } from "./types";
+import type { StreamDiagnostic, ThroughputStats } from "./types";
 
 export type LoadOpts = {
   serverId?: string;
@@ -26,6 +26,7 @@ export type LoadOpts = {
   onBytes?: (total: number) => void;
   signal?: AbortSignal;
   onStage?: (stage: "warming-up" | "measuring", warmup?: Warmup) => void;
+  onDiagnostic?: (diagnostic: StreamDiagnostic) => void;
 };
 
 const SAMPLE_MS = 250; // rolling sample window
@@ -67,25 +68,170 @@ function randomPayload(bytes: number): ArrayBuffer {
   return body;
 }
 
-type Warmup = { bytes: number; durationMs: number; succeeded: boolean };
+type Warmup = {
+  bytes: number;
+  durationMs: number;
+  succeeded: boolean;
+  diagnostics: StreamDiagnostic[];
+};
+
+type DiagnosticResponse = {
+  status: number;
+  cacheControl: string | null;
+  contentEncoding: string | null;
+  contentLength: number | null;
+  serverAcceptedBytes: number | null;
+};
+
+function canonicalEndpoint(url: string): string {
+  try {
+    const parsed = new URL(url, typeof location === "undefined" ? "https://netpulse.invalid" : location.origin);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return "unavailable";
+  }
+}
+
+function boundedHeaderNumber(value: string | null): number | null {
+  if (value === null || value.trim() === "") return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function responseFacts(response: Response): DiagnosticResponse {
+  return {
+    status: response.status,
+    cacheControl: response.headers.get("cache-control"),
+    contentEncoding: response.headers.get("content-encoding"),
+    contentLength: boundedHeaderNumber(response.headers.get("content-length")),
+    serverAcceptedBytes: boundedHeaderNumber(response.headers.get("cf-meta-upload-bytes")),
+  };
+}
+
+function browserProtocol(url: string): string | null {
+  if (typeof performance.getEntriesByName !== "function") return null;
+  const entries = performance.getEntriesByName(url, "resource") as PerformanceResourceTiming[];
+  const entry = entries.at(-1);
+  return entry?.nextHopProtocol || null;
+}
+
+function failureReason(error: unknown): string {
+  if (error instanceof Error) return `${error.name}: ${error.message}`.slice(0, 180);
+  return "Unknown request failure.";
+}
+
+function buildDiagnostic(input: {
+  direction: "download" | "upload";
+  stage: "warmup" | "measurement";
+  streamId: number;
+  requestId: number;
+  url: string;
+  startedAtMs: number;
+  responseAtMs: number | null;
+  firstByteAtMs: number | null;
+  endedAtMs: number;
+  bytes: number;
+  response: DiagnosticResponse | null;
+  outcome: StreamDiagnostic["outcome"];
+  failureReason: string | null;
+}): StreamDiagnostic {
+  const transferStartedAt = input.firstByteAtMs ?? (
+    input.direction === "upload" && input.responseAtMs !== null ? input.startedAtMs : null
+  );
+  const transferDurationMs = transferStartedAt === null
+    ? null
+    : Math.max(0, input.endedAtMs - transferStartedAt);
+  return {
+    direction: input.direction,
+    stage: input.stage,
+    stageStreams: null,
+    streamId: input.streamId,
+    requestId: input.requestId,
+    endpoint: canonicalEndpoint(input.url),
+    startedAtMs: input.startedAtMs,
+    responseAtMs: input.responseAtMs,
+    firstByteAtMs: input.firstByteAtMs,
+    endedAtMs: input.endedAtMs,
+    timeToFirstByteMs: input.responseAtMs === null ? null : Math.max(0, input.responseAtMs - input.startedAtMs),
+    transferDurationMs,
+    bytes: input.bytes,
+    transferMbps: transferDurationMs !== null && transferDurationMs > 0 && input.bytes > 0
+      ? (input.bytes * 8) / transferDurationMs / 1000
+      : null,
+    httpStatus: input.response?.status ?? null,
+    protocol: browserProtocol(input.url),
+    cacheControl: input.response?.cacheControl ?? null,
+    contentEncoding: input.response?.contentEncoding ?? null,
+    contentLength: input.response?.contentLength ?? null,
+    serverAcceptedBytes: input.response?.serverAcceptedBytes ?? null,
+    outcome: input.outcome,
+    failureReason: input.failureReason,
+  };
+}
+
+function emitDiagnostic(diagnostic: StreamDiagnostic, callback?: (value: StreamDiagnostic) => void): void {
+  callback?.(diagnostic);
+  if (import.meta.env.DEV && import.meta.env.MODE !== "test" && typeof window !== "undefined") {
+    console.debug(`[NetPulse stream diagnostic] ${JSON.stringify(diagnostic)}`);
+  }
+}
 
 async function downloadWarmup(serverId: string | undefined, signal?: AbortSignal): Promise<Warmup> {
   const server = getServer(serverId);
   const ctrl = new AbortController();
   const unlink = linkAbortSignal(ctrl, signal);
-  const timer = setTimeout(() => ctrl.abort(), WARMUP_TIMEOUT_MS);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    ctrl.abort();
+  }, WARMUP_TIMEOUT_MS);
+  const url = withCacheBuster(server.downPath(DOWNLOAD_WARMUP_BYTES));
   const started = performance.now();
+  let responseAt: number | null = null;
+  let firstByteAt: number | null = null;
+  let facts: DiagnosticResponse | null = null;
+  let bytes = 0;
   try {
-    const response = await fetch(withCacheBuster(server.downPath(DOWNLOAD_WARMUP_BYTES)), {
+    const response = await fetch(url, {
       cache: "no-store",
       signal: ctrl.signal,
     });
-    if (!response.ok) return { bytes: 0, durationMs: performance.now() - started, succeeded: false };
-    const bytes = (await response.arrayBuffer()).byteLength;
-    return { bytes, durationMs: performance.now() - started, succeeded: bytes > 0 };
-  } catch {
+    responseAt = performance.now();
+    facts = responseFacts(response);
+    if (!response.ok || !response.body) {
+      const endedAt = performance.now();
+      const diagnostic = buildDiagnostic({
+        direction: "download", stage: "warmup", streamId: 0, requestId: 0, url,
+        startedAtMs: started, responseAtMs: responseAt, firstByteAtMs: null, endedAtMs: endedAt,
+        bytes: 0, response: facts, outcome: "failed",
+        failureReason: response.ok ? "Response body was unavailable." : `HTTP ${response.status}.`,
+      });
+      return { bytes: 0, durationMs: endedAt - started, succeeded: false, diagnostics: [diagnostic] };
+    }
+    const reader = response.body.getReader();
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      if (firstByteAt === null && chunk.value.byteLength > 0) firstByteAt = performance.now();
+      bytes += chunk.value.byteLength;
+    }
+    const endedAt = performance.now();
+    const diagnostic = buildDiagnostic({
+      direction: "download", stage: "warmup", streamId: 0, requestId: 0, url,
+      startedAtMs: started, responseAtMs: responseAt, firstByteAtMs: firstByteAt, endedAtMs: endedAt,
+      bytes, response: facts, outcome: "completed", failureReason: null,
+    });
+    return { bytes, durationMs: endedAt - started, succeeded: bytes > 0, diagnostics: [diagnostic] };
+  } catch (error) {
     throwIfCancelled(signal);
-    return { bytes: 0, durationMs: performance.now() - started, succeeded: false };
+    const endedAt = performance.now();
+    const diagnostic = buildDiagnostic({
+      direction: "download", stage: "warmup", streamId: 0, requestId: 0, url,
+      startedAtMs: started, responseAtMs: responseAt, firstByteAtMs: firstByteAt, endedAtMs: endedAt,
+      bytes, response: facts, outcome: ctrl.signal.aborted ? "aborted" : "failed",
+      failureReason: timedOut ? "Warm-up timeout." : failureReason(error),
+    });
+    return { bytes: 0, durationMs: endedAt - started, succeeded: false, diagnostics: [diagnostic] };
   } finally {
     clearTimeout(timer);
     unlink();
@@ -97,22 +243,46 @@ async function uploadWarmup(serverId: string | undefined, signal?: AbortSignal):
   const body = randomPayload(UPLOAD_WARMUP_BYTES);
   const ctrl = new AbortController();
   const unlink = linkAbortSignal(ctrl, signal);
-  const timer = setTimeout(() => ctrl.abort(), WARMUP_TIMEOUT_MS);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    ctrl.abort();
+  }, WARMUP_TIMEOUT_MS);
+  const url = withCacheBuster(server.upPath);
   const started = performance.now();
+  let responseAt: number | null = null;
+  let facts: DiagnosticResponse | null = null;
   try {
-    const response = await fetch(withCacheBuster(server.upPath), {
+    const response = await fetch(url, {
       method: "POST",
       body,
       cache: "no-store",
       signal: ctrl.signal,
     });
-    const durationMs = performance.now() - started;
+    responseAt = performance.now();
+    facts = responseFacts(response);
+    const endedAt = performance.now();
+    const durationMs = endedAt - started;
+    const diagnostic = buildDiagnostic({
+      direction: "upload", stage: "warmup", streamId: 0, requestId: 0, url,
+      startedAtMs: started, responseAtMs: responseAt, firstByteAtMs: null, endedAtMs: endedAt,
+      bytes: response.ok ? body.byteLength : 0, response: facts,
+      outcome: response.ok ? "completed" : "failed",
+      failureReason: response.ok ? null : `HTTP ${response.status}.`,
+    });
     return response.ok
-      ? { bytes: body.byteLength, durationMs, succeeded: true }
-      : { bytes: 0, durationMs, succeeded: false };
-  } catch {
+      ? { bytes: body.byteLength, durationMs, succeeded: true, diagnostics: [diagnostic] }
+      : { bytes: 0, durationMs, succeeded: false, diagnostics: [diagnostic] };
+  } catch (error) {
     throwIfCancelled(signal);
-    return { bytes: 0, durationMs: performance.now() - started, succeeded: false };
+    const endedAt = performance.now();
+    const diagnostic = buildDiagnostic({
+      direction: "upload", stage: "warmup", streamId: 0, requestId: 0, url,
+      startedAtMs: started, responseAtMs: responseAt, firstByteAtMs: null, endedAtMs: endedAt,
+      bytes: 0, response: facts, outcome: ctrl.signal.aborted ? "aborted" : "failed",
+      failureReason: timedOut ? "Warm-up timeout." : failureReason(error),
+    });
+    return { bytes: 0, durationMs: endedAt - started, succeeded: false, diagnostics: [diagnostic] };
   } finally {
     clearTimeout(timer);
     unlink();
@@ -162,6 +332,7 @@ async function runLoad(
     count: (n: number) => void,
     cap: () => boolean,
     fail: () => void,
+    diagnose: (diagnostic: StreamDiagnostic) => void,
   ) => Promise<void>,
 ): Promise<ThroughputStats & { rtts: number[] }> {
   const ctrl = new AbortController();
@@ -170,6 +341,7 @@ async function runLoad(
   const streams = calibratedStreams(opts.streams, calibrationMbps);
   const samples: number[] = [];
   const rtts: number[] = [];
+  const diagnostics = [...warmup.diagnostics];
   let windowBytes = 0;
   let totalBytes = 0;
   let failedRequests = 0;
@@ -238,9 +410,13 @@ async function runLoad(
   }, opts.maxDurationMs);
   // Start the traffic first. This guarantees that every latency probe below
   // begins while at least one load request is already in flight.
+  const recordDiagnostic = (diagnostic: StreamDiagnostic) => {
+    diagnostics.push(diagnostic);
+    emitDiagnostic(diagnostic, opts.onDiagnostic);
+  };
   const load = worker(ctrl.signal, recordBytes, cap, () => {
     failedRequests++;
-  });
+  }, recordDiagnostic);
 
   let probing = true;
   const prober = (async () => {
@@ -329,6 +505,7 @@ async function runLoad(
     stopReason,
     failedRequests,
     failedProbes,
+    diagnostics,
     rtts,
   };
   unlink();
@@ -340,6 +517,7 @@ export async function downloadPhase(opts: LoadOpts) {
   throwIfCancelled(opts.signal);
   opts.onStage?.("warming-up");
   const warmup = await downloadWarmup(opts.serverId, opts.signal);
+  warmup.diagnostics.forEach((diagnostic) => emitDiagnostic(diagnostic, opts.onDiagnostic));
   opts.onStage?.("measuring", warmup);
   const requestBytes = adaptiveRequestBytes(warmup.bytes, warmup.durationMs, opts.chunkBytes, "download");
   const measuredOpts = {
@@ -348,38 +526,80 @@ export async function downloadPhase(opts: LoadOpts) {
     onBytes: (bytes: number) => opts.onBytes?.(warmup.bytes + bytes),
   };
   opts.onBytes?.(warmup.bytes);
-  return runLoad(measuredOpts, "download", warmup, requestBytes, (signal, count, cap, fail) => {
+  return runLoad(measuredOpts, "download", warmup, requestBytes, (signal, count, cap, fail, diagnose) => {
     const workers: Promise<void>[] = [];
     const streams = calibratedStreams(opts.streams, warmupMbps(warmup));
-    for (let w = 0; w < streams; w++) {
+    for (let streamId = 0; streamId < streams; streamId++) {
       workers.push(
         (async () => {
+          let requestId = 0;
           while (!signal.aborted && !cap()) {
+            const url = withCacheBuster(server.downPath(requestBytes));
+            const startedAtMs = performance.now();
+            let responseAtMs: number | null = null;
+            let firstByteAtMs: number | null = null;
+            let facts: DiagnosticResponse | null = null;
+            let requestReceivedBytes = 0;
+            let diagnosticEmitted = false;
             try {
               // Cache-buster query + no-store defeat any intermediary caching.
-              const url = withCacheBuster(server.downPath(requestBytes));
               const res = await fetch(url, { cache: "no-store", signal });
+              responseAtMs = performance.now();
+              facts = responseFacts(res);
               if (!res.ok) {
                 fail();
+                diagnose(buildDiagnostic({
+                  direction: "download", stage: "measurement", streamId, requestId, url,
+                  startedAtMs, responseAtMs, firstByteAtMs: null, endedAtMs: performance.now(),
+                  bytes: 0, response: facts, outcome: "failed", failureReason: `HTTP ${res.status}.`,
+                }));
+                diagnosticEmitted = true;
                 break;
               }
               const reader = res.body?.getReader();
               if (!reader) {
                 fail();
+                diagnose(buildDiagnostic({
+                  direction: "download", stage: "measurement", streamId, requestId, url,
+                  startedAtMs, responseAtMs, firstByteAtMs: null, endedAtMs: performance.now(),
+                  bytes: 0, response: facts, outcome: "failed", failureReason: "Response body was unavailable.",
+                }));
+                diagnosticEmitted = true;
                 break;
               }
+              let stoppedAtCap = false;
               for (;;) {
                 const { done, value } = await reader.read();
                 if (done) break;
+                if (firstByteAtMs === null && value.byteLength > 0) firstByteAtMs = performance.now();
+                requestReceivedBytes += value.byteLength;
                 count(value.byteLength);
                 if (cap()) {
+                  stoppedAtCap = true;
                   void reader.cancel();
                   break;
                 }
               }
-            } catch {
+              diagnose(buildDiagnostic({
+                direction: "download", stage: "measurement", streamId, requestId, url,
+                startedAtMs, responseAtMs, firstByteAtMs, endedAtMs: performance.now(),
+                bytes: requestReceivedBytes, response: facts,
+                outcome: stoppedAtCap ? "aborted" : "completed",
+                failureReason: stoppedAtCap ? "Measurement phase reached its stop condition." : null,
+              }));
+              diagnosticEmitted = true;
+            } catch (error) {
               if (!signal.aborted) fail();
+              if (!diagnosticEmitted) diagnose(buildDiagnostic({
+                direction: "download", stage: "measurement", streamId, requestId, url,
+                startedAtMs, responseAtMs, firstByteAtMs, endedAtMs: performance.now(),
+                bytes: requestReceivedBytes, response: facts,
+                outcome: signal.aborted ? "aborted" : "failed",
+                failureReason: signal.aborted ? "Measurement phase stopped." : failureReason(error),
+              }));
               break;
+            } finally {
+              requestId += 1;
             }
           }
         })(),
@@ -394,6 +614,7 @@ export async function uploadPhase(opts: LoadOpts) {
   throwIfCancelled(opts.signal);
   opts.onStage?.("warming-up");
   const warmup = await uploadWarmup(opts.serverId, opts.signal);
+  warmup.diagnostics.forEach((diagnostic) => emitDiagnostic(diagnostic, opts.onDiagnostic));
   opts.onStage?.("measuring", warmup);
   const requestBytes = adaptiveRequestBytes(warmup.bytes, warmup.durationMs, opts.chunkBytes, "upload");
   // Non-personal payload generated in memory. Web Crypto limits each call to
@@ -405,28 +626,53 @@ export async function uploadPhase(opts: LoadOpts) {
     onBytes: (bytes: number) => opts.onBytes?.(warmup.bytes + bytes),
   };
   opts.onBytes?.(warmup.bytes);
-  return runLoad(measuredOpts, "upload", warmup, requestBytes, (signal, count, cap, fail) => {
+  return runLoad(measuredOpts, "upload", warmup, requestBytes, (signal, count, cap, fail, diagnose) => {
     const workers: Promise<void>[] = [];
     const streams = calibratedStreams(opts.streams, warmupMbps(warmup));
-    for (let w = 0; w < streams; w++) {
+    for (let streamId = 0; streamId < streams; streamId++) {
       workers.push(
         (async () => {
+          let requestId = 0;
           while (!signal.aborted && !cap()) {
+            const url = withCacheBuster(server.upPath);
+            const startedAtMs = performance.now();
+            let responseAtMs: number | null = null;
+            let facts: DiagnosticResponse | null = null;
             try {
-              const res = await fetch(withCacheBuster(server.upPath), {
+              const res = await fetch(url, {
                 method: "POST",
                 body,
                 cache: "no-store",
                 signal,
               });
+              responseAtMs = performance.now();
+              facts = responseFacts(res);
               if (!res.ok) {
                 fail();
+                diagnose(buildDiagnostic({
+                  direction: "upload", stage: "measurement", streamId, requestId, url,
+                  startedAtMs, responseAtMs, firstByteAtMs: null, endedAtMs: performance.now(),
+                  bytes: 0, response: facts, outcome: "failed", failureReason: `HTTP ${res.status}.`,
+                }));
                 break;
               }
               count(requestBytes);
-            } catch {
+              diagnose(buildDiagnostic({
+                direction: "upload", stage: "measurement", streamId, requestId, url,
+                startedAtMs, responseAtMs, firstByteAtMs: null, endedAtMs: performance.now(),
+                bytes: requestBytes, response: facts, outcome: "completed", failureReason: null,
+              }));
+            } catch (error) {
               if (!signal.aborted) fail();
+              diagnose(buildDiagnostic({
+                direction: "upload", stage: "measurement", streamId, requestId, url,
+                startedAtMs, responseAtMs, firstByteAtMs: null, endedAtMs: performance.now(),
+                bytes: 0, response: facts, outcome: signal.aborted ? "aborted" : "failed",
+                failureReason: signal.aborted ? "Measurement phase stopped." : failureReason(error),
+              }));
               break;
+            } finally {
+              requestId += 1;
             }
           }
         })(),

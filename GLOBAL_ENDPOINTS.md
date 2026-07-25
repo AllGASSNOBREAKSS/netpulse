@@ -2,6 +2,12 @@
 
 NetPulse does not currently operate a worldwide test-server fleet. The checked-in directory contains one active Cloudflare anycast fallback; every named NetPulse region is `planned`. The fuller rollout, capacity, abuse, privacy, and observability design is in [GLOBAL_NETWORK.md](GLOBAL_NETWORK.md).
 
+The normative future node interface is
+[TEST_NODE_PROTOCOL.md](TEST_NODE_PROTOCOL.md), and candidate discovery,
+ranking, failover, manual selection, and multi-server verification are defined
+in [SERVER_DISCOVERY_SPEC.md](SERVER_DISCOVERY_SPEC.md). These documents are
+design gates, not live infrastructure.
+
 ## Current supported directory
 
 `public/network/endpoints.v1.json` is the source of truth. Its active endpoint supports browser HTTPS download, upload, latency, and provider trace requests. It does not provide a NetPulse-controlled echo protocol, endpoint health, capacity, active-test count, received-byte receipt, or compatible engine-version report. Anycast chooses a provider edge; that edge is not necessarily the geographically nearest server and is not the user's location. The isolated validation endpoint implements the contract locally but is not public regional coverage.

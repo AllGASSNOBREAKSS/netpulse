@@ -1,4 +1,4 @@
-# NetPulse measurement pipeline (v3.1)
+# NetPulse measurement pipeline (v4 local)
 
 This document is the reference for **what NetPulse measures and how**. It is the
 honest contract behind every number the UI shows.
@@ -19,9 +19,9 @@ Each stage is a separate module under `src/lib/`. The orchestrator
 | 1 | Preflight | `preflight.ts` | Browser, OS, device class, tab foreground state, secure context, three family-specific IPv4/IPv6 HTTPS timings, connection type, explicit Cloudflare WARP signal where reported, other VPN/proxy status **unknown**, estimated duration + data |
 | 2 | Server selection | `globalNetwork.ts` + `servers.ts` | Validates a versioned HTTPS endpoint directory; shallow/deep probes compatible candidates; rejects disabled, draining, stale, unavailable, and version-incompatible nodes; ranks latency, jitter, probe consistency, reachability, live health, load, and capacity; retains backups; explains degraded selection |
 | 3 | Idle latency | `latency.ts` | 14 (10 low-data) zero-byte probes, `performance.now()` timed → min / median / mean / interquartile mean / p90 / p95 / p99 / jitter / stddev / failed / count |
-| 4 | Download | `throughput.ts` | Discarded warm-up; adaptive request size and stream count; **single-connection** then **multi-connection** run; cache-busted, no-store; received payload ÷ actual phase time; timed windows for P5/median/P95/peak/variation; explicit stop reason |
-| 5 | Upload | `throughput.ts` | Discarded generated-payload warm-up; adaptive POST size/streams; parallel non-personal in-memory payloads; successfully submitted payload ÷ actual phase time; cumulative successful-response observations and browser limitation labels |
-| 6 | Loaded latency | `throughput.ts` | Continuous probes **during** download and upload, kept separate |
+| 4 | Download | `capacityClient.ts` + measurement worker | Discarded warm-up; adaptive 1 → 2 → 4 → 6/8 ramp; maximum capacity plus reliable stable-window and single-stream results; exact request diagnostics |
+| 5 | Upload | `capacityClient.ts` + measurement worker | Discarded generated-payload warm-up; bounded adaptive 1 → 2 → 4 ramp; maximum and reliable results; provider byte receipt retained only when exposed |
+| 6 | Loaded latency | measurement worker | Lightweight probes **during** download and upload, kept separate |
 | 7 | Echo and UDP reachability | `packetloss.ts` | Controlled WebSocket message delivery when an endpoint advertises it, otherwise an **experimental** WebRTC/STUN reachability check. Neither is relabeled as network packet loss |
 | 8 | Bufferbloat | `grading.ts` | Loaded − idle latency rise, **separate** for download and upload, graded A–F |
 | 9 | Stability | `grading.ts` | 0–100 score from loaded-latency spread, spikes, worse down/up throughput variation, failed probes/requests, and completion; p95/p99; longest spike; probe completeness |
@@ -30,7 +30,7 @@ Each stage is a separate module under `src/lib/`. The orchestrator
 | 12 | Multi-server verification | `secondaryVerification.ts` | A bounded secondary download when an independently probed backup exists; agreement/disagreement is shown and incompatible results are never averaged |
 | 13 | Confidence | `confidence.ts` | 0–100 trust score with exact visible deductions for sampling, variation, server stability, secondary disagreement, tab visibility, completion, and errors |
 | 14 | Accuracy Passport | `accuracyPassport.ts` | Run/version IDs, confidence reasons, client/endpoint/transport facts, family comparison, secondary verification, data, duration, streams, sample and retry counts |
-| 13 | Export/local evidence | `export.ts` + `evidenceStore.ts` | Full JSON plus privacy-filtered raw events and phase journal; latest 20 complete runs retained only on-device in IndexedDB |
+| 15 | Export/local evidence | `export.ts` + `evidenceStore.ts` | Full JSON plus privacy-filtered raw events and phase journal; latest 20 complete runs retained only on-device in IndexedDB |
 
 ## Timing
 
@@ -46,20 +46,31 @@ read slightly higher than raw ICMP ping because they include TLS/HTTP framing.
   from the timed throughput result.
 - **Cache-busting**: every transfer carries a monotonic unique query string and
   `cache: "no-store"` so a cached body cannot become a measurement.
-- **Single then multi connection**: a single stream reveals per-flow shaping;
-  warm-up throughput selects one, two, or up to the profile's maximum parallel
-  streams. The
-  headline figure is the multi-connection result.
-- **Reported value**: application payload transferred or accepted divided by
-  the phase's actual wall-clock duration. This includes ramp-up instead of
-  selecting only faster windows. Download windows are retained for median,
-  P5, median, P95 capacity context, peak, and variation; no percentile is substituted for
-  the aggregate headline. Cloudflare's own test currently documents a P90
-  method, which is one reason its headline may differ even on the same network.
-  upload observations update only after a POST succeeds because Fetch does
-  not expose byte-level upload progress. A successful response is not a
-  cryptographic server-side byte receipt, so public-endpoint upload is labeled
-  successfully submitted payload rather than independently verified receipt.
+- **Adaptive stream ramp**: one stream establishes per-flow behavior, then the
+  worker tries 2, 4, 6, and 8 streams while aggregate throughput continues to
+  improve. A short warm-up can size requests but cannot cap later concurrency.
+- **Browser connection limit**: a "stream" is one concurrent Fetch request.
+  The browser may multiplex several requests over one HTTP/2 or HTTP/3
+  transport connection. NetPulse does not claim eight independent TCP/QUIC
+  connections; that requires multiple validated endpoint origins, which are
+  not deployed today.
+- **Maximum Capacity**: total application payload across every stream divided by
+  one shared monotonic stage window. Only stages that reach the configured
+  comparison duration qualify when at least one such stage exists; otherwise
+  the result is retained with an explicit data-cap limitation.
+- **Reliable Throughput**: the median of the stable half of real 500 ms windows
+  from the highest completed stage using at most four streams. P5, P95, peak,
+  variation, and the single-stream result remain separate.
+- **Measurement isolation**: fetch streaming and throughput statistics run in a
+  Web Worker. React receives throttled progress targets at most every 100 ms;
+  gauge RAF interpolation never defines or changes measurement timing.
+  Upload random-body generation occurs before the shared stage clock and one
+  incompressible body is reused across that stage. Upload observations update
+  only after a POST succeeds because Fetch does not expose byte-level upload
+  progress. An allowlisted provider received-byte header is used when exposed,
+  but it does not provide NetPulse-controlled server receive timing or a
+  cryptographically verifiable receipt. Otherwise the value is successfully
+  submitted payload.
 - **Direction isolation**: download and upload run sequentially so each loaded-
   latency result can be attributed to one direction. Running them concurrently
   would be a different full-duplex stress test and would not make either
@@ -72,19 +83,28 @@ read slightly higher than raw ICMP ping because they include TLS/HTTP framing.
   BGP routing, peering, congestion, device limits, and methodology vary by ISP.
   NetPulse does not use private Ookla or Netflix endpoints and cannot promise
   identical results.
-- **Early stopping**: for download, once the recent samples' coefficient of variation drops
-  below 5% (after a minimum duration and ≥12 samples), the phase stops. This
-  saves data without hurting accuracy, and is disclosed in the result.
+- **Ramp stopping**: the next stream stage runs only while aggregate throughput
+  improves by at least 5%, bounded by the selected duration and application-byte
+  budget. This is a saturation search, not a promise that the browser or endpoint
+  can certify every multi-gigabit link.
 - **Caps and stop reasons**: every phase has a hard duration cap and a payload
   target. Results retain whether a phase stopped because samples stabilized, the
   duration expired, the payload cap was reached, or all workers completed.
   Payload-capped phases that miss the minimum duration lose confidence. In-flight
   requests can overshoot slightly; displayed data is application payload
   including warm-ups, not exact on-wire usage.
+- **High-speed budget**: in the five-stage Full download ramp, 65% of the
+  configured payload budget is reserved for the final eight-request stage.
+  This allows roughly four seconds at approximately 1 Gbps instead of
+  exhausting the data cap before the nominal stability window.
+- **Compression**: a response that explicitly reports a non-identity
+  `Content-Encoding` is rejected; it is never presented as link capacity.
 - **Upload limitation**: Fetch exposes neither byte-level upload progress nor
-  protocol overhead or a server-side byte receipt. Upload is successfully
-  submitted payload divided by phase time. Median, peak observation, and variation use cumulative successful-response
-  observations and are labeled as such rather than packet-level windows.
+  protocol overhead. The fallback provider can expose a received-byte count,
+  but not the complete NetPulse upload receipt in `TEST_NODE_PROTOCOL.md`.
+  Upload is acknowledged/submitted payload divided by phase time. Median, peak
+  observation, and variation use cumulative successful-response observations
+  and are labeled as such rather than packet-level windows.
 
 ## Echo and UDP reachability — why packet loss remains unavailable
 

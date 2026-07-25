@@ -56,7 +56,12 @@ describe("measurement pipeline integration", () => {
     expect(result.packetLoss.status).toBe("unavailable");
     expect(result.confidence.reasons.some((reason) => reason.label === "Upload duration")).toBe(true);
     expect(result.samples.every((sample) => sample.t >= 0)).toBe(true);
-    expect(result.schemaVersion).toBe(4);
+    expect(result.schemaVersion).toBe(5);
+    expect(result.capacity.download.stages.map((stage) => stage.streams)).toEqual([1, 2]);
+    expect(result.capacity.download.maximumMbps).toBeGreaterThan(0);
+    expect(result.capacity.download.reliable.mbps).toBeGreaterThan(0);
+    expect(result.capacity.download.singleStreamMbps).toBeGreaterThan(0);
+    expect(result.rawEvidence.streamDiagnostics.length).toBeGreaterThan(0);
     expect(result.runId).toMatch(/^np-/);
     expect(result.rawEvidence.events.length).toBeGreaterThan(result.samples.length);
     expect(result.rawEvidence.phases.every((phase) => phase.status === "completed")).toBe(true);

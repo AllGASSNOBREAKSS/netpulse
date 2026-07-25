@@ -48,7 +48,7 @@ const SECTIONS: { id: string; title: string; body: string[] }[] = [
     id: "transparency",
     title: "Measurement transparency",
     body: [
-      "Tests run against Cloudflare's anycast speed endpoints over HTTPS. Throughput is the median of the top half of multi-connection samples; latency uses monotonic high-resolution timing; the health-score formula lives in one documented source file and is rendered verbatim in the score breakdown panel.",
+      "Tests currently run against Cloudflare's anycast speed endpoints over HTTPS. Maximum Capacity uses exact application bytes across an adaptive 1 → 2 → 4 → 6 → 8 request ramp divided by one shared monotonic stage window. Reliable Throughput is a separately labeled stable-window median; latency uses monotonic high-resolution timing.",
       "Results will differ from Ookla, Fast.com, or M-Lab — different servers, different methods. NetPulse documents its methodology rather than tuning results to match anyone.",
     ],
   },

@@ -9,9 +9,9 @@ The engine runs these attributable phases in order:
 1. Create a versioned run record, calibrate browser-visible client capability, and collect three family-specific IPv4 and IPv6 HTTPS timings where reachable.
 2. Load the versioned endpoint directory, probe compatible endpoints, and select one endpoint.
 3. Collect browser Resource Timing and any explicitly exposed server TCP/QUIC telemetry, then warm the latency path and collect sequential idle HTTPS round trips.
-4. Warm and measure a single-stream download.
-5. Warm and measure a multi-stream download while probing download-loaded latency.
-6. Warm and measure a multi-stream upload while probing upload-loaded latency.
+4. In a Web Worker, discard a download warm-up and run the adaptive 1 → 2 → 4 → 6/8 capacity ramp while lightweight download-loaded latency probes continue.
+5. In the same worker architecture, discard an upload warm-up and run the bounded upload ramp while lightweight upload-loaded latency probes continue.
+6. Derive maximum capacity and the separately labeled reliable stable-window result from their real ramp stages.
 7. Use a controlled WebSocket echo when the selected endpoint advertises one; otherwise attempt the separately labeled experimental WebRTC/STUN UDP-reachability check.
 8. Calculate bufferbloat and stability, run a bounded secondary download when an independent backup endpoint exists, calculate confidence, and create the Accuracy Passport.
 9. Publish a result only after a completed or explicitly low-confidence terminal state. Failed and cancelled runs are not published.
@@ -22,35 +22,39 @@ Download and upload are sequential. Running both directions together would measu
 
 ### Download
 
-The endpoint returns cache-busted, `no-store` application payload. NetPulse reads `ReadableStream` chunks and counts bytes delivered to JavaScript. A discarded warm-up chooses an adaptive request size. The headline result is the multi-stream phase:
+The endpoint returns cache-busted, `no-store` application payload. A dedicated Web Worker reads `ReadableStream` chunks and counts bytes delivered to JavaScript. A discarded warm-up seeds adaptive request sizing but no longer suppresses later stream stages.
 
 ```text
-download Mbps = received application bytes × 8 ÷ actual phase milliseconds ÷ 1,000
+stage capacity Mbps = total bytes from every stream × 8 ÷ one shared stage window in milliseconds ÷ 1,000
 ```
 
-The denominator is the observed `performance.now()` interval, not an assumed timer interval. A final partial window prevents a fast byte-capped phase from becoming an artificial zero. Per-window values describe variation; they do not replace the authoritative byte-over-time result.
+The stream ramp is 1 → 2 → 4 → 6 → 8 in the full profile. A higher stage runs only while aggregate throughput continues improving by at least 5%, subject to the duration and byte ceilings. Request payloads target a useful transfer interval and grow with measured per-stream capacity. In the five-stage Full profile, the per-stage shares are 3%, 4%, 18%, 10%, and 65%, preserving enough payload for an approximately four-second final stage near 1 Gbps. **Maximum Capacity** is the fastest stage that reaches the minimum comparison duration when one exists; otherwise the fastest real stage is retained with an explicit limited-confidence reason. **Reliable Throughput** is the median of the stable half of real 500 ms windows from the highest completed stage using at most four streams; single-stream throughput is also retained.
+
+All timing uses `performance.now()`. Request diagnostics retain TTFB and transfer-only duration, but the capacity denominator deliberately covers the complete shared stage, including request turnover. Failed and aborted requests remain visible evidence and reduce confidence. A response that explicitly reports non-identity content encoding is rejected. Completed response payload is counted from the bytes actually read, not trusted from `Content-Length`.
+
+In this document, a stream is a concurrent browser Fetch request, not proof of a separate TCP or QUIC connection. HTTP/2 and HTTP/3 can multiplex requests from the same origin onto fewer transport connections. The current single Cloudflare origin therefore cannot reproduce the independent-connection topology of a native client or a multi-host test network. NetPulse records this limitation rather than inventing connection counts.
 
 ### Upload
 
-NetPulse creates non-personal, in-memory random payloads in Web Crypto-sized chunks and POSTs them to the selected endpoint. A request counts only after Fetch resolves with a successful HTTP response:
+NetPulse creates one non-personal, in-memory random payload per upload stage in Web Crypto-sized chunks before the shared network timer starts, then reuses that incompressible body across the stage's requests. This prevents mobile CPU cost from being mislabeled as network transfer time. A request counts only after Fetch resolves with a successful HTTP response:
 
 ```text
 upload Mbps = successfully submitted application payload bytes × 8 ÷ actual phase milliseconds ÷ 1,000
 ```
 
-Fetch does not expose byte-level upload progress or a server-side received-byte receipt. Live upload observations therefore use cumulative successfully submitted payload over elapsed time. Aborted partial bodies, HTTP/TLS/TCP/IP overhead, retransmissions, and link-layer overhead are excluded. A future NetPulse-operated endpoint must acknowledge received bytes before the wording can be strengthened to server-received payload.
+Fetch does not expose byte-level upload progress. Live upload observations therefore use cumulative successfully submitted payload over elapsed time. When a provider exposes an allowlisted received-byte receipt such as `cf-meta-upload-bytes`, NetPulse uses that received count and retains it in request diagnostics; it does not invent a receipt when the header is absent. Aborted partial bodies, HTTP/TLS/TCP/IP overhead, retransmissions, and link-layer overhead are excluded.
 
 ### Duration, streams, and data
 
 The checked-in profiles are the source of truth:
 
-| Profile | Single download | Multi download | Upload | Configured payload ceiling |
-| --- | --- | --- | --- | --- |
-| Full | 1 stream, 3–6 s, 80 MB | 4 streams, 4–9 s, 220 MB | 3 streams, 4–8 s, 70 MB | 372.256 MB including warm-ups, before bounded in-flight overshoot |
-| Low data | 1 stream, 2–4 s, 12 MB | 2 streams, 2–5 s, 22 MB | 1 stream, 2–4 s, 8 MB | 44.256 MB including warm-ups, before bounded in-flight overshoot |
-| Quick diagnostics | 1 stream, short bounded phase | up to 2 calibrated streams, short bounded phase | 1 calibrated stream, short bounded phase | Defined in `src/lib/profiles.ts`; used only for guided A/B diagnostics |
+| Profile | Download ramp | Upload ramp | Configured payload ceiling |
+| --- | --- | --- | --- |
+| Full | 1 → 2 → 4 → 6 → 8 streams, 15 s / 750 MB cap, 64 MB max request | 1 → 2 → 4 streams, 11 s / 150 MB cap, 8 MB max request | 902.512 MB including warm-ups, before bounded in-flight overshoot |
+| Low data | 1 → 2 streams, 5 s / 25 MB cap | 1 stream, 3.5 s / 10 MB cap | 36.256 MB including warm-ups, before bounded in-flight overshoot |
+| Quick diagnostics | 1 → 2 streams, 3.5 s / 14 MB cap | 1 stream, 2.5 s / 5 MB cap | 19.942 MB including warm-ups, before bounded in-flight overshoot |
 
-Warm-up throughput calibrates measured request size and concurrency: below 10 Mbps uses one stream, below 100 Mbps up to two, below 500 Mbps up to four, bounded by the selected profile. Phases can stop after enough stable samples, on duration, or on the byte cap. Results record duration, bytes, P5/median/P95/peak, request size, actual streams, calibration rate, sample count, failures, stop reason, and the time the stable-window rule was met when early stopping occurs.
+Results record every ramp stage, shared-window capacity, reliable median/P5/P95/peak, request size, actual streams, exact application bytes, warm-up bytes, duration, failed requests/probes, stop reason, protocol when visible, cache/compression headers, and privacy-filtered per-request timing. The UI receives progress no more frequently than every 100 ms and uses that only as a presentation target.
 
 ## Latency and jitter
 

@@ -12,7 +12,7 @@ import type { MeasurementEvent, PhaseJournalEntry, PipelinePhase } from "./measu
 import type { Summary } from "./stats";
 export type { Summary };
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export type Phase =
   | "idle"
@@ -127,6 +127,35 @@ export type ServerSelection = {
 };
 
 /* ---- Throughput ----------------------------------------------------------- */
+export type StreamDiagnostic = {
+  direction: "download" | "upload";
+  stage: "warmup" | "measurement";
+  /** Active requests in this stage; null only for the legacy non-worker fallback. */
+  stageStreams: number | null;
+  streamId: number;
+  requestId: number;
+  /** Canonical public endpoint without cache-busting query values. */
+  endpoint: string;
+  /** Monotonic timestamps from performance.now(); never wall-clock identity data. */
+  startedAtMs: number;
+  responseAtMs: number | null;
+  firstByteAtMs: number | null;
+  endedAtMs: number;
+  timeToFirstByteMs: number | null;
+  transferDurationMs: number | null;
+  bytes: number;
+  transferMbps: number | null;
+  httpStatus: number | null;
+  protocol: string | null;
+  cacheControl: string | null;
+  contentEncoding: string | null;
+  contentLength: number | null;
+  /** Provider receipt when explicitly exposed (for example cf-meta-upload-bytes). */
+  serverAcceptedBytes: number | null;
+  outcome: "completed" | "aborted" | "failed";
+  failureReason: string | null;
+};
+
 export type ThroughputStats = {
   /** Application payload bits divided by the phase's actual elapsed time. */
   mbps: number;
@@ -156,6 +185,67 @@ export type ThroughputStats = {
   failedRequests: number;
   /** Loaded-latency probes that failed while traffic was active. */
   failedProbes: number;
+  /** Per-request, privacy-filtered evidence. It never includes IP/location headers or cache IDs. */
+  diagnostics: StreamDiagnostic[];
+};
+
+export type CapacityStage = {
+  streams: number;
+  aggregateMbps: number;
+  medianMbps: number;
+  p5Mbps: number;
+  p95Mbps: number;
+  peakMbps: number;
+  variationPct: number;
+  /** Download: timed 500 ms windows. Upload: cumulative completed-response observations. */
+  samples: number[];
+  bytes: number;
+  durationMs: number;
+  requestBytes: number;
+  failedRequests: number;
+  failedProbes: number;
+  improvementPct: number | null;
+  stopReason: "duration" | "data-cap" | "completed" | "error";
+  diagnostics: StreamDiagnostic[];
+};
+
+export type ReliableThroughput = {
+  status: "measured" | "limited";
+  mbps: number;
+  singleStreamMbps: number;
+  medianMbps: number;
+  p5Mbps: number;
+  p95Mbps: number;
+  peakMbps: number;
+  variationPct: number;
+  samples: number[];
+  sampleCount: number;
+  streams: number;
+  bytes: number;
+  durationMs: number;
+  method: string;
+  limitation: string | null;
+};
+
+export type DirectionCapacity = {
+  direction: "download" | "upload";
+  maximumMbps: number;
+  reliable: ReliableThroughput;
+  singleStreamMbps: number;
+  bytes: number;
+  warmupBytes: number;
+  durationMs: number;
+  selectedStreams: number;
+  endpoint: string;
+  stages: CapacityStage[];
+  diagnostics: StreamDiagnostic[];
+  rtts: number[];
+  failedRequests: number;
+  failedProbes: number;
+  warmupSucceeded: boolean;
+  requestCompressionObserved: boolean;
+  workerUsed: boolean;
+  reducedConfidenceReasons: string[];
 };
 
 /* ---- Bufferbloat ---------------------------------------------------------- */
@@ -295,6 +385,7 @@ export type RawMeasurementEvidence = {
   calibration: ClientCalibration;
   phases: PhaseJournalEntry[];
   events: MeasurementEvent[];
+  streamDiagnostics: StreamDiagnostic[];
 };
 
 /* ---- Full result ---------------------------------------------------------- */
@@ -315,6 +406,10 @@ export type TestResult = {
 
   download: { single: ThroughputStats; multi: ThroughputStats };
   upload: ThroughputStats;
+  capacity: {
+    download: DirectionCapacity;
+    upload: DirectionCapacity;
+  };
 
   loadedDown: Summary;
   loadedUp: Summary;

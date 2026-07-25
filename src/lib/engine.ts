@@ -1,6 +1,7 @@
 /** Durable, event-driven NetPulse browser measurement orchestrator. */
 import { buildAccuracyPassport } from "./accuracyPassport";
 import { isCancellation, linkAbortSignal, MeasurementCancelledError, throwIfCancelled } from "./cancellation";
+import { measureDirectionCapacity, type CapacityClientOptions } from "./capacityClient";
 import { calibrateClient } from "./clientCalibration";
 import { computeConfidence } from "./confidence";
 import { computeBufferbloat, computeStability } from "./grading";
@@ -21,10 +22,11 @@ import { resolveProfile } from "./profiles";
 import { verifySecondaryDownload } from "./secondaryVerification";
 import { getServer, selectServer } from "./servers";
 import { summarize } from "./stats";
-import { downloadPhase, uploadPhase, type LoadOpts } from "./throughput";
 import { collectTransportTelemetry } from "./transportTelemetry";
 import {
   SCHEMA_VERSION,
+  type CapacityStage,
+  type DirectionCapacity,
   type EngineCallbacks,
   type IspLocation,
   type Sample,
@@ -37,7 +39,6 @@ export type { Phase, TestConfig, TestResult, Sample, EngineCallbacks } from "./t
 export { pingOnce } from "./latency";
 
 type TraceInfo = Record<string, string>;
-type MeasuredThroughput = ThroughputStats & { rtts: number[] };
 
 async function fetchTrace(serverId: string, signal?: AbortSignal): Promise<TraceInfo | null> {
   const tracePath = getServer(serverId).tracePath;
@@ -157,54 +158,49 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
     cb.onPartial?.({ idleLatency, idlePingMs: idleLatency.median, idleJitterMs: idleLatency.jitter });
 
     cb.onPhase?.("download_single");
-    const single = await runTransferSegment("download", "single", recorder, cfg, (onStage) => downloadPhase({
+    let multiDownloadAnnounced = false;
+    const downloadCapacity = await runCapacitySegment("download", recorder, cfg, (onStage) => measureDirectionCapacity({
       serverId,
-      streams: profile.single.streams,
-      minDurationMs: profile.single.minMs,
-      maxDurationMs: profile.single.maxMs,
-      maxBytes: profile.single.maxBytes,
-      chunkBytes: profile.single.chunkBytes,
-      onThroughput: (mbps) => push({ phase: "download_single", mbps, streamMode: "single" }),
-      onRtt: (rtt) => push({ phase: "download_single", rttMs: rtt }),
-      onBytes: (bytes) => cb.onBytes?.(bytes),
-      onStage,
+      direction: "download",
+      profile: profile.capacityDownload,
+      onProgress: (mbps, streams) => push({
+        phase: streams === 1 ? "download_single" : "download_multi",
+        mbps,
+        streamMode: streams === 1 ? "single" : "multi",
+      }),
+      onLatency: (rtt) => push({ phase: "download_multi", rttMs: rtt }),
+      onBytes: cb.onBytes,
+      onStage: (stage, streams) => {
+        if (stage === "measurement" && streams > 1 && !multiDownloadAnnounced) {
+          multiDownloadAnnounced = true;
+          cb.onPhase?.("download_multi");
+        }
+        onStage(stage, streams);
+      },
       signal: cfg.signal,
     }));
-
-    cb.onPhase?.("download_multi");
-    const multi = await runTransferSegment("download", "multi", recorder, cfg, (onStage) => downloadPhase({
-      serverId,
-      streams: profile.multi.streams,
-      minDurationMs: profile.multi.minMs,
-      maxDurationMs: profile.multi.maxMs,
-      maxBytes: profile.multi.maxBytes,
-      chunkBytes: profile.multi.chunkBytes,
-      onThroughput: (mbps) => push({ phase: "download_multi", mbps, streamMode: "multi" }),
-      onRtt: (rtt) => push({ phase: "download_multi", rttMs: rtt }),
-      onBytes: (bytes) => cb.onBytes?.(payloadBytes(single) + bytes),
-      onStage,
-      signal: cfg.signal,
-    }));
-    const loadedDownRtts = [...single.rtts, ...multi.rtts];
+    const singleStage = downloadCapacity.stages.find((stage) => stage.streams === 1) ?? downloadCapacity.stages[0];
+    const maximumDownStage = bestStage(downloadCapacity);
+    const single = stageToThroughput(singleStage, downloadCapacity.warmupBytes, downloadCapacity.warmupSucceeded);
+    const multi = stageToThroughput(maximumDownStage, 0, downloadCapacity.warmupSucceeded);
+    const loadedDownRtts = downloadCapacity.rtts;
     const loadedDown = summarize(loadedDownRtts);
     if (loadedDown.count === 0) throw new Error("Download-loaded latency failed: no probe completed while download load was active.");
     cb.onPartial?.({ downloadMbps: multi.mbps, loadedDown, loadedDownPingMs: loadedDown.median });
 
     cb.onPhase?.("upload");
-    const upload = await runTransferSegment("upload", "multi", recorder, cfg, (onStage) => uploadPhase({
+    const uploadCapacity = await runCapacitySegment("upload", recorder, cfg, (onStage) => measureDirectionCapacity({
       serverId,
-      streams: profile.upload.streams,
-      minDurationMs: profile.upload.minMs,
-      maxDurationMs: profile.upload.maxMs,
-      maxBytes: profile.upload.maxBytes,
-      chunkBytes: profile.upload.chunkBytes,
-      onThroughput: (mbps) => push({ phase: "upload", mbps, streamMode: "multi" }),
-      onRtt: (rtt) => push({ phase: "upload", rttMs: rtt }),
-      onBytes: (bytes) => cb.onBytes?.(payloadBytes(single) + payloadBytes(multi) + bytes),
+      direction: "upload",
+      profile: profile.capacityUpload,
+      onProgress: (mbps, streams) => push({ phase: "upload", mbps, streamMode: streams === 1 ? "single" : "multi" }),
+      onLatency: (rtt) => push({ phase: "upload", rttMs: rtt }),
+      onBytes: (bytes) => cb.onBytes?.(downloadCapacity.bytes + bytes),
       onStage,
       signal: cfg.signal,
     }));
-    const loadedUp = summarize(upload.rtts);
+    const upload = stageToThroughput(bestStage(uploadCapacity), uploadCapacity.warmupBytes, uploadCapacity.warmupSucceeded);
+    const loadedUp = summarize(uploadCapacity.rtts);
     if (loadedUp.count === 0) throw new Error("Upload-loaded latency failed: no probe completed while upload load was active.");
     cb.onPartial?.({ uploadMbps: upload.mbps, loadedUp, loadedUpPingMs: loadedUp.median });
 
@@ -217,13 +213,13 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
       return value;
     });
 
-    const requestErrors = single.failedRequests + multi.failedRequests + upload.failedRequests;
-    const loadedFailed = single.failedProbes + multi.failedProbes + upload.failedProbes;
+    const requestErrors = downloadCapacity.failedRequests + uploadCapacity.failedRequests;
+    const loadedFailed = downloadCapacity.failedProbes + uploadCapacity.failedProbes;
     const { bufferbloat, stability } = await runPhase("analyzing-stability", () => ({
       bufferbloat: computeBufferbloat(idleLatency, loadedDown, loadedUp),
       stability: computeStability(
         idleLatency.median,
-        [...loadedDownRtts, ...upload.rtts],
+        [...loadedDownRtts, ...uploadCapacity.rtts],
         multi.cov,
         upload.cov,
         loadedFailed,
@@ -232,7 +228,7 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
       ),
     }));
 
-    const primaryPayloadBytes = payloadBytes(single) + payloadBytes(multi) + payloadBytes(upload);
+    const primaryPayloadBytes = downloadCapacity.bytes + uploadCapacity.bytes;
     const secondary = await runPhase("verifying-abnormal-results", async () => {
       recorder.emit("verification-started", "verifying-abnormal-results", {
         backupEndpoints: server.backups.length,
@@ -275,13 +271,13 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
       idleProbeCount: idleRtts.length,
       idleFailed,
       loadedDownProbeCount: loadedDownRtts.length,
-      loadedUpProbeCount: upload.rtts.length,
+      loadedUpProbeCount: uploadCapacity.rtts.length,
       serverAvailable: server.chosen.available,
       serverJitterMs: server.chosen.latency.jitter,
       downloadWarmupSucceeded: single.warmupSucceeded && multi.warmupSucceeded,
       uploadWarmupSucceeded: upload.warmupSucceeded,
-      downloadMinimumDurationMet: multi.durationMs >= profile.multi.minMs,
-      uploadMinimumDurationMet: upload.durationMs >= profile.upload.minMs,
+      downloadMinimumDurationMet: multi.durationMs >= profile.capacityDownload.stageMinMs,
+      uploadMinimumDurationMet: upload.durationMs >= profile.capacityUpload.stageMinMs,
       tabForegroundThroughout,
       completed: true,
       errors: requestErrors + loadedFailed,
@@ -302,17 +298,18 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
       earlyStopped: multi.earlyStopped,
       requestErrors,
       loadedFailed,
-      warmupFailures: [single, multi, upload].filter((phase) => !phase.warmupSucceeded).length,
+      warmupFailures: [downloadCapacity, uploadCapacity].filter((phase) => !phase.warmupSucceeded).length,
       byteCappedPhases: [
-        single.stopReason === "data-cap" ? "single-download" : null,
-        multi.stopReason === "data-cap" ? "multi-download" : null,
-        upload.stopReason === "data-cap" ? "upload" : null,
+        downloadCapacity.stages.some((stage) => stage.stopReason === "data-cap") ? "download-capacity" : null,
+        uploadCapacity.stages.some((stage) => stage.stopReason === "data-cap") ? "upload-capacity" : null,
       ].filter((phase): phase is string => phase !== null),
       server,
       secondaryStatus: secondary.verification.status,
       packetLossTransport: packetLoss.transport,
     });
     limitations.push(...calibration.warnings.map((warning) => `Client calibration: ${warning}`));
+    limitations.push(...downloadCapacity.reducedConfidenceReasons.map((reason) => `Download capacity: ${reason}`));
+    limitations.push(...uploadCapacity.reducedConfidenceReasons.map((reason) => `Upload capacity: ${reason}`));
 
     const durationMs = performance.now() - monotonicStart;
     const dataBytes = primaryPayloadBytes + (secondary.throughput ? payloadBytes(secondary.throughput) : 0);
@@ -328,6 +325,11 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
       calibration,
       phases: recorder.phases.map((phase) => ({ ...phase })),
       events: recorder.events.map((event) => ({ ...event, data: { ...event.data } })),
+      streamDiagnostics: [
+        ...downloadCapacity.diagnostics,
+        ...uploadCapacity.diagnostics,
+        ...(secondary.throughput?.diagnostics ?? []),
+      ],
     };
     const accuracyPassport = buildAccuracyPassport({
       confidence,
@@ -365,6 +367,7 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
       idleFailed,
       download: { single, multi },
       upload,
+      capacity: { download: downloadCapacity, upload: uploadCapacity },
       loadedDown,
       loadedUp,
       bufferbloat,
@@ -387,7 +390,7 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
       bufferbloatMs: Math.max(bufferbloat.downloadMs, bufferbloat.uploadMs),
       bufferbloatGrade: bufferbloat.overallGrade,
       spikes: stability.spikes,
-      probeCount: loadedDownRtts.length + upload.rtts.length,
+      probeCount: loadedDownRtts.length + uploadCapacity.rtts.length,
     };
     cb.onPartial?.(result);
     return result;
@@ -441,13 +444,12 @@ async function selectEndpoint(
   }
 }
 
-async function runTransferSegment(
+async function runCapacitySegment(
   direction: "download" | "upload",
-  streamMode: "single" | "multi",
   recorder: MeasurementRunRecorder,
   cfg: TestConfig,
-  work: (onStage: NonNullable<LoadOpts["onStage"]>) => Promise<MeasuredThroughput>,
-): Promise<MeasuredThroughput> {
+  work: (onStage: NonNullable<CapacityClientOptions["onStage"]>) => Promise<DirectionCapacity>,
+): Promise<DirectionCapacity> {
   const phase: PipelinePhase = direction === "download" ? "measuring-download" : "measuring-upload";
   const loadedPhase: PipelinePhase = direction === "download" ? "measuring-download-loaded-latency" : "measuring-upload-loaded-latency";
   const warmupPhase: PipelinePhase = direction === "download" ? "warming-up-download" : "warming-up-upload";
@@ -455,27 +457,32 @@ async function runTransferSegment(
 
   for (let attempt = 0; attempt <= retries; attempt += 1) {
     throwIfCancelled(cfg.signal);
-    const warmup = recorder.begin(warmupPhase, { streamMode });
+    const warmup = recorder.begin(warmupPhase);
     let measured: PhaseToken | null = null;
     let loaded: PhaseToken | null = null;
     try {
-      const value = await work((stage, details) => {
-        if (stage !== "measuring") return;
-        recorder.complete(warmup, {
-          succeeded: details?.succeeded ?? false,
-          bytes: details?.bytes ?? 0,
-          durationMs: details?.durationMs ?? 0,
-        });
-        measured = recorder.begin(phase, { streamMode });
-        loaded = recorder.begin(loadedPhase, { streamMode });
+      const value = await work((stage, streams) => {
+        if (stage !== "measurement") return;
+        if (!measured) {
+          recorder.complete(warmup, { nextStreams: streams });
+          measured = recorder.begin(phase, { streams });
+          loaded = recorder.begin(loadedPhase, { streams });
+        } else {
+          recorder.emit(direction === "download" ? "download-progress" : "upload-progress", phase, { streams });
+        }
       });
-      if (!measured) measured = recorder.begin(phase, { streamMode });
-      if (!loaded) loaded = recorder.begin(loadedPhase, { streamMode });
+      if (!measured) measured = recorder.begin(phase);
+      if (!loaded) loaded = recorder.begin(loadedPhase);
       recorder.emit(direction === "download" ? "download-completed" : "upload-completed", phase, {
-        mbps: value.mbps,
-        streams: value.streams,
+        mbps: value.maximumMbps,
+        reliableMbps: value.reliable.mbps,
+        streams: value.selectedStreams,
       }, true);
-      recorder.complete(measured, { mbps: value.mbps, streams: value.streams });
+      recorder.complete(measured, {
+        mbps: value.maximumMbps,
+        reliableMbps: value.reliable.mbps,
+        streams: value.selectedStreams,
+      });
       recorder.complete(loaded, { samples: value.rtts.length });
       return value;
     } catch (error) {
@@ -487,6 +494,44 @@ async function runTransferSegment(
     }
   }
   throw new Error(`${direction} phase exhausted its retry policy.`);
+}
+
+function bestStage(capacity: DirectionCapacity): CapacityStage {
+  return capacity.stages.reduce((best, stage) => stage.aggregateMbps > best.aggregateMbps ? stage : best);
+}
+
+function stageToThroughput(
+  stage: CapacityStage,
+  warmupBytes: number,
+  warmupSucceeded: boolean,
+): ThroughputStats {
+  return {
+    mbps: stage.aggregateMbps,
+    peakMbps: stage.peakMbps,
+    medianMbps: stage.medianMbps,
+    p5Mbps: stage.p5Mbps,
+    p95Mbps: stage.p95Mbps,
+    variationPct: stage.variationPct,
+    samples: stage.samples,
+    cov: coefficientFromPercent(stage.variationPct),
+    bytes: stage.bytes,
+    warmupBytes,
+    warmupSucceeded,
+    requestBytes: stage.requestBytes,
+    streams: stage.streams,
+    calibrationMbps: null,
+    durationMs: stage.durationMs,
+    earlyStopped: false,
+    stableAtMs: null,
+    stopReason: stage.stopReason,
+    failedRequests: stage.failedRequests,
+    failedProbes: stage.failedProbes,
+    diagnostics: stage.diagnostics,
+  };
+}
+
+function coefficientFromPercent(variationPct: number): number {
+  return Math.max(0, variationPct) / 100;
 }
 
 function retryCount(cfg: TestConfig, phase: PipelinePhase): number {

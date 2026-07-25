@@ -10,7 +10,6 @@
  *   marketing paraphrase.
  */
 import type { TestResult } from "./engine";
-import { percentile } from "./stats";
 
 export type MetricSamples = { values: number[]; unit: string; caption: string };
 
@@ -52,9 +51,9 @@ export const METRICS: MetricDef[] = [
     hotPhase: "download",
     value: (r) => (r.downloadMbps !== undefined ? `${fmt(r.downloadMbps)} Mbps` : null),
     sub: (r) =>
-      r.download ? `aggregate ${fmt(r.download.multi.mbps)} · p90 ${fmt(percentile(r.download.multi.samples, 90) || r.download.multi.mbps)} · variation ${r.download.multi.variationPct.toFixed(1)}%` : null,
+      r.capacity ? `maximum ${fmt(r.capacity.download.maximumMbps)} · reliable ${fmt(r.capacity.download.reliable.mbps)} · single ${fmt(r.capacity.download.singleStreamMbps)}` : null,
     what: "How much data your connection can pull down per second — the headline number ISPs advertise.",
-    how: "A discarded warm-up transfer primes DNS/TLS and chooses an adaptive request payload. NetPulse then runs one HTTPS stream followed by up to four parallel streams (two in low-data mode). Every request is cache-busted and no-store. The headline is measured application payload divided by actual phase time; 250 ms windows provide median, 90th-percentile capacity context, peak, and variation. The load stops only after its minimum duration and steady sampling, or at the duration/data cap.",
+    how: "A discarded warm-up transfer primes the route and sizes later requests. A Web Worker then tests 1 → 2 → 4 → 6 → 8 concurrent HTTPS requests in Full mode while aggregate throughput is still improving. Every request is cache-busted, no-store, and rejected if the response reports compression. Maximum Capacity is the best qualifying stage's exact application bytes divided by one shared monotonic stage window. Reliable Throughput is the median of the stable half of real 500 ms windows from the highest completed stage using at most four requests.",
     why: "Determines how fast pages, downloads, streams and updates arrive. The gap between single and multi connection speed hints at whether a single flow is being shaped. Past ~100 Mbps, responsiveness (latency) matters more than raw speed.",
     bands: [
       { range: "≥ 300 Mbps", label: "More than almost any household needs" },
@@ -71,7 +70,7 @@ export const METRICS: MetricDef[] = [
           : "No action needed — this is plenty for everyday use.",
     samples: (r) => {
       const values = mbpsOf(r, DL_PHASES);
-      return values.length ? { values, unit: "Mbps", caption: "Timed throughput windows (~250 ms, plus the final partial window; single then multi connection)" } : null;
+      return values.length ? { values, unit: "Mbps", caption: "Worker capacity progress and real 500 ms throughput windows across the adaptive stream ramp" } : null;
     },
   },
   {
@@ -81,9 +80,9 @@ export const METRICS: MetricDef[] = [
     hotPhase: "upload",
     value: (r) => (r.uploadMbps !== undefined ? `${fmt(r.uploadMbps)} Mbps` : null),
     sub: (r) =>
-      r.upload ? `median ${fmt(r.upload.medianMbps)} · peak obs. ${fmt(r.upload.peakMbps)} · variation ${r.upload.variationPct.toFixed(1)}%` : null,
+      r.capacity ? `maximum ${fmt(r.capacity.upload.maximumMbps)} · reliable ${fmt(r.capacity.upload.reliable.mbps)} · single ${fmt(r.capacity.upload.singleStreamMbps)}` : null,
     what: "How much data your connection can push out per second.",
-    how: "A discarded generated-payload warm-up primes the route and chooses an adaptive POST size and bounded stream count. HTTPS POST streams then send non-personal, non-compressible bytes from memory. Throughput is successfully submitted payload divided by actual phase time. Fetch exposes neither byte-level upload progress, a server-side byte receipt, nor wire overhead, so median, peak observation, and variation use cumulative successful-response observations and are labeled accordingly.",
+    how: "A discarded generated-payload warm-up primes the route. Before each timed stage, the Web Worker creates one non-personal, incompressible body and reuses it across a 1 → 2 → 4 request ramp so random-byte generation cannot depress the timed network result on mobile hardware. A completed request counts the provider's allowlisted received-byte receipt when exposed; otherwise it counts the successfully submitted application payload. Fetch still exposes neither byte-level upload progress nor wire overhead.",
     why: "Video calls, livestreaming, cloud backups and sending files all depend on upload. Many cable plans are heavily asymmetric — a fraction of the download figure.",
     bands: [
       { range: "≥ 50 Mbps", label: "Excellent — streaming and backups without thinking" },

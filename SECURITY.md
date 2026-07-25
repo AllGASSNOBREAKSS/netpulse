@@ -19,3 +19,26 @@ Security fixes target the current `main` branch and current production deploymen
 ## Operator responsibilities
 
 Self-hosters must protect secrets, enforce least-privilege database roles, apply security updates, configure rate/WAF controls, test backups, review logs, and comply with the AGPL-3.0-only license. See [SECURITY_AUDIT.md](SECURITY_AUDIT.md), [INCIDENT_RESPONSE.md](INCIDENT_RESPONSE.md), and [DEPLOYMENT_RUNBOOK.md](DEPLOYMENT_RUNBOOK.md).
+
+## Measurement-node security boundary
+
+No public NetPulse measurement node is currently authorized or deployed.
+Before a pilot, the node must implement the reviewed
+[TEST_NODE_PROTOCOL.md](TEST_NODE_PROTOCOL.md) and pass:
+
+- strict origin, version, session, duration, stream, byte, and body bounds;
+- per-session and rotating per-address/coarse-prefix rate limits;
+- overload admission that stops tests before capacity distorts results;
+- no arbitrary fetch/proxy target, relay, reflection, broadcast, or file
+  storage functionality;
+- short-lived signed grants with keys unavailable to the browser;
+- safe error responses without stack traces, credentials, private hosts, or
+  internal topology;
+- DDoS, malformed-input, session replay, CORS, IPv4/IPv6, drain, failover, and
+  rollback tests;
+- allowlisted logs that exclude payloads, full addresses in analytics, exact
+  location, tokens, and cache nonces.
+
+Bot challenges may be used only when risk justifies them and an accessible
+fallback exists. Passing a challenge is not measurement evidence, and challenge
+failure must not become a fake slow result.
