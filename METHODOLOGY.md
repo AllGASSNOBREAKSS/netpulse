@@ -70,7 +70,7 @@ The checked-in profiles are the source of truth:
 
 | Profile | Download ramp | Upload ramp | Configured payload ceiling |
 | --- | --- | --- | --- |
-| Full | 1 → 2 → 4 → 6 → 8 streams, 32 s / 3,000 MB cap, 128 MB max request; 3 s ramp and 6 s final-window requirements | 1 → 2 → 4 streams, 24 s / 500 MB cap, 24 MB max request; 2.5 s ramp and 5 s final-window requirements | 3,505 MB including warm-ups, before bounded in-flight overshoot |
+| Full | 1 → 2 → 4 → 6 → 8 streams, 32 s / 3,000 MB cap, 32 MB max request; 3 s ramp and 6 s final-window requirements | 1 → 2 → 4 streams, 24 s / 500 MB cap, 24 MB max request; 2.5 s ramp and 5 s final-window requirements | 3,505 MB including warm-ups, before bounded in-flight overshoot |
 | Low data | 1 → 2 streams, 10 s / 30 MB cap, 12 MB max request | 1 stream, 7 s / 8 MB cap, 1.5 MB max request | 38.878 MB including warm-ups, before bounded in-flight overshoot |
 | Quick diagnostics | 1 → 2 streams, 7 s / 14 MB cap, 4 MB max request | 1 stream, 5 s / 4 MB cap, 0.75 MB max request | 18.596 MB including warm-ups, before bounded in-flight overshoot |
 

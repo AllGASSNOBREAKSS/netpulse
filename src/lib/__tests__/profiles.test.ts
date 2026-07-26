@@ -19,6 +19,7 @@ describe("measurement profile budgets", () => {
     const finalBudget = (profile.maxBytes - profile.warmupBytes) * 0.65;
     const required = 2_500_000_000 / 8 * (profile.finalStageMinMs / 1_000);
     expect(finalBudget).toBeGreaterThanOrEqual(required);
+    expect(profile.maxRequestBytes).toBeLessThanOrEqual(32_000_000);
   });
 
   it("keeps the hard data ceiling distinct from typical expected use", () => {

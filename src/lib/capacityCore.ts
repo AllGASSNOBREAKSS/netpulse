@@ -686,7 +686,15 @@ async function runStageWithRecovery(
   const reason = first.diagnostics.find((item) => item.failureClassification)?.failureClassification
     ?? (first.stopReason === "setup-timeout" ? "endpoint-setup-timeout" : "response-body-empty");
   const retryStreams = Math.max(1, Math.floor(streams / 2));
-  const retryBytes = Math.max(1, Math.min(Math.floor(requestBytes / 2), byteBudget));
+  // Recovery must favor prompt first-byte evidence over large individual
+  // transfers. A half-size retry can still be 64 MB in the full profile,
+  // which is enough to trigger buffering or memory pressure in mobile
+  // browsers before JavaScript receives the first chunk.
+  const recoveryRequestCeiling = plan.direction === "download" ? 8_000_000 : 1_500_000;
+  const retryBytes = Math.max(
+    1,
+    Math.min(Math.floor(requestBytes / 2), recoveryRequestCeiling, byteBudget),
+  );
   const retry = await runCapacityStage(
     plan,
     `${stageId}-retry`,

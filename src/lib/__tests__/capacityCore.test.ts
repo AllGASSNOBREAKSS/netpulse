@@ -247,14 +247,14 @@ describe("capacity measurement accounting", () => {
     }) as typeof fetch;
     try {
       const result = await measureCapacity(
-        { ...plan, streamRamp: [1], maxBytes: 4_000, maxRequestBytes: 1_000, warmupBytes: 500 },
+        { ...plan, streamRamp: [1], maxBytes: 9_000_000, maxRequestBytes: 32_000_000, warmupBytes: 500 },
         {},
         new AbortController().signal,
       );
       expect(result.stages).toHaveLength(1);
       expect(result.stages[0].retryAttempt).toBe(1);
       expect(result.stages[0].recoveredFromFailure).toBe(true);
-      expect(result.stages[0].requestBytes).toBeLessThanOrEqual(500);
+      expect(result.stages[0].requestBytes).toBeLessThanOrEqual(8_000_000);
       expect(result.stages[0].diagnostics.some((item) => item.failureClassification === "response-body-empty")).toBe(true);
       expect(result.publication.maximum.valueMbps).not.toBeNull();
     } finally {

@@ -6,7 +6,7 @@ export const PROFILES = {
     single: { streams: 1, chunkBytes: 25_000_000, minMs: 3000, maxMs: 6000, maxBytes: 80_000_000 },
     multi: { streams: 4, chunkBytes: 25_000_000, minMs: 4000, maxMs: 9000, maxBytes: 220_000_000 },
     upload: { streams: 3, chunkBytes: 2_000_000, minMs: 4000, maxMs: 8000, maxBytes: 70_000_000 },
-    capacityDownload: { ramp: [1, 2, 4, 6, 8], maxMs: 32_000, maxBytes: 3_000_000_000, maxRequestBytes: 128_000_000, warmupBytes: 4_000_000, setupTimeoutMs: 8_000, stageMinMs: 3_000, stageMaxMs: 3_500, finalStageMinMs: 6_000, stageMinBytes: 8_000_000, minValidSamples: 5, maxVariationPct: 30, allowEarlyStatisticalStop: false },
+    capacityDownload: { ramp: [1, 2, 4, 6, 8], maxMs: 32_000, maxBytes: 3_000_000_000, maxRequestBytes: 32_000_000, warmupBytes: 4_000_000, setupTimeoutMs: 8_000, stageMinMs: 3_000, stageMaxMs: 3_500, finalStageMinMs: 6_000, stageMinBytes: 8_000_000, minValidSamples: 5, maxVariationPct: 30, allowEarlyStatisticalStop: false },
     capacityUpload: { ramp: [1, 2, 4], maxMs: 24_000, maxBytes: 500_000_000, maxRequestBytes: 24_000_000, warmupBytes: 1_000_000, setupTimeoutMs: 8_000, stageMinMs: 2_500, stageMaxMs: 3_000, finalStageMinMs: 5_000, stageMinBytes: 1_000_000, minValidSamples: 4, maxVariationPct: 35, allowEarlyStatisticalStop: false },
     estimatedDurationSec: 52,
     estimatedDataMB: 2_500,
