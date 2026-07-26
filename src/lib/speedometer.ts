@@ -41,10 +41,10 @@ export function interpolateSpeed(currentMbps: number, targetMbps: number, deltaS
   const current = Number.isFinite(currentMbps) ? Math.max(0, currentMbps) : 0;
   const target = Number.isFinite(targetMbps) ? Math.max(0, targetMbps) : 0;
   const delta = Number.isFinite(deltaSeconds) ? Math.min(Math.max(deltaSeconds, 0), 1 / 30) : 0;
-  const timeConstant = target >= current ? 0.2 : 0.32;
+  const timeConstant = target >= current ? 0.15 : 0.22;
   const blend = 1 - Math.exp(-delta / timeConstant);
   const next = current + (target - current) * blend;
-  const settleThreshold = Math.max(0.01, target * 0.00025);
+  const settleThreshold = Math.max(0.05, target * 0.005);
 
   if (Math.abs(target - next) <= settleThreshold) return target;
   return target >= current ? Math.min(next, target) : Math.max(next, target);

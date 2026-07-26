@@ -128,6 +128,8 @@ export type ServerSelection = {
 
 /* ---- Throughput ----------------------------------------------------------- */
 export type StreamDiagnostic = {
+  runId?: string;
+  stageId?: string;
   direction: "download" | "upload";
   stage: "warmup" | "measurement";
   /** Active requests in this stage; null only for the legacy non-worker fallback. */
@@ -140,6 +142,8 @@ export type StreamDiagnostic = {
   startedAtMs: number;
   responseAtMs: number | null;
   firstByteAtMs: number | null;
+  measurementWindowStartedAtMs?: number | null;
+  measurementWindowEndedAtMs?: number | null;
   endedAtMs: number;
   timeToFirstByteMs: number | null;
   transferDurationMs: number | null;
@@ -150,6 +154,11 @@ export type StreamDiagnostic = {
   cacheControl: string | null;
   contentEncoding: string | null;
   contentLength: number | null;
+  requestBytes?: number;
+  stageByteBudget?: number;
+  browserVisibility?: "visible" | "hidden" | "prerender" | "unavailable";
+  abortReason?: string | null;
+  failureClassification?: CapacityFailureClassification | null;
   /** Application payload the client attempted to submit for this request. */
   clientAttemptedBytes: number;
   /** Provider receipt when explicitly exposed (for example cf-meta-upload-bytes). */
@@ -161,6 +170,27 @@ export type StreamDiagnostic = {
   outcome: "completed" | "aborted" | "failed";
   failureReason: string | null;
 };
+
+export type CapacityFailureClassification =
+  | "endpoint-setup-timeout"
+  | "endpoint-http-error"
+  | "cors-or-network-fetch-failure"
+  | "response-body-unavailable"
+  | "response-body-empty"
+  | "compressed-response-rejected"
+  | "premature-duration-abort"
+  | "parent-cancellation"
+  | "browser-interruption"
+  | "unknown-endpoint-failure";
+
+export type CapacityStageStopReason =
+  | "stable"
+  | "duration"
+  | "overall-duration"
+  | "data-cap"
+  | "completed"
+  | "error"
+  | "setup-timeout";
 
 export type UploadReceiptStatus = "verified" | "partial" | "missing" | "mismatch" | "invalid";
 
@@ -203,7 +233,7 @@ export type ThroughputStats = {
   earlyStopped: boolean;
   /** Elapsed phase time when the stable-window early-stop criterion was met. */
   stableAtMs: number | null;
-  stopReason: "stable" | "duration" | "data-cap" | "completed" | "error";
+  stopReason: CapacityStageStopReason;
   /** Requests that failed before the phase completed. */
   failedRequests: number;
   /** Loaded-latency probes that failed while traffic was active. */
@@ -215,6 +245,18 @@ export type ThroughputStats = {
 export type CapacityStage = {
   stageId: string;
   streams: number;
+  configuredStreams?: number;
+  retryAttempt?: 0 | 1;
+  recoveredFromFailure?: boolean;
+  recoveryReason?: CapacityFailureClassification | null;
+  wallClockStartedAtMs?: number;
+  firstRequestStartedAtMs?: number | null;
+  firstResponseAtMs?: number | null;
+  firstPayloadAtMs?: number | null;
+  measurementStartedAtMs?: number | null;
+  measurementEndedAtMs?: number | null;
+  wallClockDurationMs?: number;
+  stageByteBudget?: number;
   aggregateMbps: number;
   medianMbps: number;
   trimmedMeanMbps: number;
@@ -230,10 +272,12 @@ export type CapacityStage = {
   bytes: number;
   durationMs: number;
   requestBytes: number;
+  requestCount?: number;
+  completedRequests?: number;
   failedRequests: number;
   failedProbes: number;
   improvementPct: number | null;
-  stopReason: "stable" | "duration" | "data-cap" | "completed" | "error";
+  stopReason: CapacityStageStopReason;
   rampState: "baseline" | "ramping" | "saturation" | "ceiling";
   endpointHealth: "healthy" | "degraded" | "draining" | "unavailable" | "unknown";
   qualification: StageQualification;
@@ -446,9 +490,42 @@ export type AccuracyPassport = {
   knownLimitations: string[];
   reducedConfidenceReasons: string[];
   resultPublication: ResultPublication;
+  profileEvidence: {
+    selectedProfile: "full" | "lowData" | "quick";
+    profileSource: "explicit" | "low-data-toggle" | "default-full";
+    lowData: boolean;
+    configuredDownloadDurationMs: number;
+    configuredUploadDurationMs: number;
+    configuredDownloadByteCeiling: number;
+    configuredUploadByteCeiling: number;
+    actualDownloadMeasuredDurationMs: number;
+    actualUploadMeasuredDurationMs: number;
+    actualDownloadBytes: number;
+    actualUploadBytes: number;
+  };
   stageQualification: {
-    download: Array<{ stageId: string; streams: number; status: StageQualificationStatus; reasons: string[] }>;
-    upload: Array<{ stageId: string; streams: number; status: StageQualificationStatus; reasons: string[] }>;
+    download: Array<{
+      stageId: string;
+      streams: number;
+      status: StageQualificationStatus;
+      measuredDurationMs: number;
+      wallClockDurationMs: number;
+      bytes: number;
+      stopReason: CapacityStageStopReason;
+      recoveredFromFailure: boolean;
+      reasons: string[];
+    }>;
+    upload: Array<{
+      stageId: string;
+      streams: number;
+      status: StageQualificationStatus;
+      measuredDurationMs: number;
+      wallClockDurationMs: number;
+      bytes: number;
+      stopReason: CapacityStageStopReason;
+      recoveredFromFailure: boolean;
+      reasons: string[];
+    }>;
   };
 };
 

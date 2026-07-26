@@ -12,6 +12,7 @@ export type CapacityPlan = {
   maxBytes: number;
   maxRequestBytes: number;
   warmupBytes: number;
+  setupTimeoutMs: number;
   stageMinMs: number;
   stageMaxMs: number;
   finalStageMinMs: number;

@@ -21,24 +21,23 @@ function measuredValue(value: number): number {
 export function useGaugeMotion(targets: GaugeValues): GaugeValues {
   const reducedMotion = useReducedMotion();
   const currentRef = useRef<GaugeValues>(ZERO_VALUES);
+  const targetRef = useRef<GaugeValues>(ZERO_VALUES);
+  const reducedMotionRef = useRef(reducedMotion);
   const [display, setDisplay] = useState<GaugeValues>(ZERO_VALUES);
 
   useEffect(() => {
-    const target = {
+    targetRef.current = {
       download: measuredValue(targets.download),
       upload: measuredValue(targets.upload),
     };
+  }, [targets.download, targets.upload]);
 
+  useEffect(() => {
+    reducedMotionRef.current = reducedMotion;
+  }, [reducedMotion]);
+
+  useEffect(() => {
     let frameId = 0;
-
-    if (reducedMotion) {
-      frameId = requestAnimationFrame(() => {
-        currentRef.current = target;
-        setDisplay(target);
-      });
-      return () => cancelAnimationFrame(frameId);
-    }
-
     let previousTime: number | null = null;
 
     const tick = (time: number) => {
@@ -47,21 +46,23 @@ export function useGaugeMotion(targets: GaugeValues): GaugeValues {
         : Math.min((time - previousTime) / 1000, 1 / 30);
       previousTime = time;
 
-      const next = {
-        download: interpolateSpeed(currentRef.current.download, target.download, deltaSeconds),
-        upload: interpolateSpeed(currentRef.current.upload, target.upload, deltaSeconds),
-      };
-      currentRef.current = next;
-      setDisplay(next);
-
-      if (next.download !== target.download || next.upload !== target.upload) {
-        frameId = requestAnimationFrame(tick);
+      const target = targetRef.current;
+      const next = reducedMotionRef.current
+        ? target
+        : {
+            download: interpolateSpeed(currentRef.current.download, target.download, deltaSeconds),
+            upload: interpolateSpeed(currentRef.current.upload, target.upload, deltaSeconds),
+          };
+      if (next.download !== currentRef.current.download || next.upload !== currentRef.current.upload) {
+        currentRef.current = next;
+        setDisplay(next);
       }
+      frameId = requestAnimationFrame(tick);
     };
 
     frameId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frameId);
-  }, [reducedMotion, targets.download, targets.upload]);
+  }, []);
 
   return display;
 }

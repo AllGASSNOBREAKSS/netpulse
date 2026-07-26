@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { profileDataCeilingMB, PROFILES } from "../profiles";
+import { profileDataCeilingMB, PROFILES, resolveProfile } from "../profiles";
 
 describe("measurement profile budgets", () => {
   it("keeps low-data mode inside its explicit application-payload ceiling", () => {
@@ -23,5 +23,11 @@ describe("measurement profile budgets", () => {
 
   it("keeps the hard data ceiling distinct from typical expected use", () => {
     expect(profileDataCeilingMB(false, "full")).toBeGreaterThan(PROFILES.full.estimatedDataMB);
+  });
+
+  it("selects full by default and never applies quick mode heuristically", () => {
+    expect(resolveProfile(undefined, false)).toBe(PROFILES.full);
+    expect(resolveProfile(undefined, true)).toBe(PROFILES.lowData);
+    expect(resolveProfile("quick", false)).toBe(PROFILES.quick);
   });
 });

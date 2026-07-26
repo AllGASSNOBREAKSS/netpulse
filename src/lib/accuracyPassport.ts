@@ -35,6 +35,7 @@ export function buildAccuracyPassport(input: {
   resultPublication: ResultPublication;
   downloadCapacity: DirectionCapacity;
   uploadCapacity: DirectionCapacity;
+  profileEvidence: AccuracyPassport["profileEvidence"];
 }): AccuracyPassport {
   const failedRequests = input.download.failedRequests + input.upload.failedRequests;
   const failedProbes = input.idleFailed + input.download.failedProbes + input.upload.failedProbes;
@@ -75,17 +76,28 @@ export function buildAccuracyPassport(input: {
       upload: { ...input.resultPublication.upload, reasons: [...input.resultPublication.upload.reasons] },
       disclosures: [...input.resultPublication.disclosures],
     },
+    profileEvidence: { ...input.profileEvidence },
     stageQualification: {
       download: input.downloadCapacity.stages.map((stage) => ({
         stageId: stage.stageId,
         streams: stage.streams,
         status: stage.qualification.status,
+        measuredDurationMs: stage.durationMs,
+        wallClockDurationMs: stage.wallClockDurationMs ?? stage.durationMs,
+        bytes: stage.bytes,
+        stopReason: stage.stopReason,
+        recoveredFromFailure: stage.recoveredFromFailure ?? false,
         reasons: [...stage.qualification.reasons],
       })),
       upload: input.uploadCapacity.stages.map((stage) => ({
         stageId: stage.stageId,
         streams: stage.streams,
         status: stage.qualification.status,
+        measuredDurationMs: stage.durationMs,
+        wallClockDurationMs: stage.wallClockDurationMs ?? stage.durationMs,
+        bytes: stage.bytes,
+        stopReason: stage.stopReason,
+        recoveredFromFailure: stage.recoveredFromFailure ?? false,
         reasons: [...stage.qualification.reasons],
       })),
     },

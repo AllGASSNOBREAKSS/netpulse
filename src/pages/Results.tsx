@@ -70,6 +70,15 @@ function AccuracyPassportPanel({ result }: { result: TestResult }) {
           { k: "Endpoint load", v: passport.endpointLoadPct === null ? "not reported" : `${Math.round(passport.endpointLoadPct)}%` },
           { k: "Streams", v: `${passport.downloadStreams} download · ${passport.uploadStreams} upload` },
           { k: "Measured payload", v: `${(passport.bytesTransferred / 1_000_000).toFixed(1)} MB` },
+          { k: "Test profile", v: `${passport.profileEvidence.selectedProfile} (${passport.profileEvidence.profileSource})`, mono: false },
+          {
+            k: "Configured direction budgets",
+            v: `${Math.round(passport.profileEvidence.configuredDownloadDurationMs / 1000)} s download · ${Math.round(passport.profileEvidence.configuredUploadDurationMs / 1000)} s upload`,
+          },
+          {
+            k: "Measured transfer windows",
+            v: `${Math.round(passport.profileEvidence.actualDownloadMeasuredDurationMs)} ms download · ${Math.round(passport.profileEvidence.actualUploadMeasuredDurationMs)} ms upload`,
+          },
           { k: "Secondary check", v: verification.reason, mono: false },
           { k: "Secondary method", v: verification.method, mono: false },
           { k: "IPv4 path", v: formatFamily(passport.ipComparison.ipv4), mono: false },

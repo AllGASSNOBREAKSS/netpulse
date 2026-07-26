@@ -373,6 +373,19 @@ export async function runTest(cfg: TestConfig, cb: EngineCallbacks): Promise<Tes
       resultPublication: publication,
       downloadCapacity,
       uploadCapacity,
+      profileEvidence: {
+        selectedProfile: profileMode,
+        profileSource: cfg.profile ? "explicit" : cfg.lowData ? "low-data-toggle" : "default-full",
+        lowData: cfg.lowData,
+        configuredDownloadDurationMs: profile.capacityDownload.maxMs,
+        configuredUploadDurationMs: profile.capacityUpload.maxMs,
+        configuredDownloadByteCeiling: profile.capacityDownload.maxBytes,
+        configuredUploadByteCeiling: profile.capacityUpload.maxBytes,
+        actualDownloadMeasuredDurationMs: downloadCapacity.stages.reduce((sum, stage) => sum + stage.durationMs, 0),
+        actualUploadMeasuredDurationMs: uploadCapacity.stages.reduce((sum, stage) => sum + stage.durationMs, 0),
+        actualDownloadBytes: downloadCapacity.bytes,
+        actualUploadBytes: uploadCapacity.bytes,
+      },
     });
     const dataUsedMB = dataBytes / 1_000_000;
 

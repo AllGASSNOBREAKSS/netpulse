@@ -2,6 +2,7 @@ import { coefficientOfVariation, interquartileMean, max, median, percentile } fr
 import type { CapacityPlan } from "./capacityProtocol";
 import type {
   CapacityStage,
+  CapacityFailureClassification,
   DirectionCapacity,
   DirectionPublication,
   StageQualification,
@@ -131,11 +132,21 @@ function uploadReceipt(
   };
 }
 
-function assertUncompressed(response: Response): void {
-  const encoding = response.headers.get("content-encoding");
-  if (encoding !== null && encoding.toLowerCase() !== "identity") {
-    throw new Error(`Compressed measurement response (${encoding}) is not valid for capacity accounting.`);
+function hasNonIdentityEncoding(item: StreamDiagnostic): boolean {
+  return item.contentEncoding !== null && item.contentEncoding.toLowerCase() !== "identity";
+}
+
+function downloadPayloadMismatch(item: StreamDiagnostic): boolean {
+  if (item.direction !== "download" || item.outcome !== "completed") return false;
+  if (hasNonIdentityEncoding(item)) {
+    // Fetch exposes decoded application bytes while retaining the response's
+    // Content-Encoding header. Content-Length can therefore describe encoded
+    // wire bytes and is not comparable. The endpoint request size remains the
+    // honest completed-response contract.
+    const requestedBytes = item.requestBytes ?? 0;
+    return requestedBytes > 0 && item.bytes !== requestedBytes;
   }
+  return item.contentLength !== null && item.contentLength !== item.bytes;
 }
 
 function protocolFor(url: string): string | null {
@@ -160,6 +171,12 @@ function diagnostic(input: {
   response: Response | null;
   outcome: StreamDiagnostic["outcome"];
   failureReason: string | null;
+  measurementWindowStartedAtMs?: number | null;
+  measurementWindowEndedAtMs?: number | null;
+  requestBytes?: number;
+  stageByteBudget?: number;
+  abortReason?: string | null;
+  failureClassification?: CapacityFailureClassification | null;
 }): StreamDiagnostic {
   const transferStart = input.plan.direction === "download"
     ? input.firstByteAtMs
@@ -167,6 +184,8 @@ function diagnostic(input: {
   const transferDurationMs = transferStart === null ? null : Math.max(0, input.endedAtMs - transferStart);
   const receipt = uploadReceipt(input.plan, input.stageId, input.attemptedBytes, input.response);
   return {
+    runId: input.plan.runId,
+    stageId: input.stageId,
     direction: input.plan.direction,
     stage: input.stage,
     stageStreams: input.stageStreams,
@@ -176,6 +195,8 @@ function diagnostic(input: {
     startedAtMs: input.startedAtMs,
     responseAtMs: input.responseAtMs,
     firstByteAtMs: input.firstByteAtMs,
+    measurementWindowStartedAtMs: input.measurementWindowStartedAtMs ?? null,
+    measurementWindowEndedAtMs: input.measurementWindowEndedAtMs ?? null,
     endedAtMs: input.endedAtMs,
     timeToFirstByteMs: input.responseAtMs === null ? null : Math.max(0, input.responseAtMs - input.startedAtMs),
     transferDurationMs,
@@ -188,6 +209,15 @@ function diagnostic(input: {
     cacheControl: input.response?.headers.get("cache-control") ?? null,
     contentEncoding: input.response?.headers.get("content-encoding") ?? null,
     contentLength: headerInteger(input.response?.headers.get("content-length") ?? null),
+    requestBytes: input.requestBytes ?? input.attemptedBytes,
+    stageByteBudget: input.stageByteBudget ?? input.plan.maxBytes,
+    browserVisibility: typeof document === "undefined"
+      ? "unavailable"
+      : document.visibilityState === "visible" || document.visibilityState === "hidden" || document.visibilityState === "prerender"
+        ? document.visibilityState
+        : "unavailable",
+    abortReason: input.abortReason ?? null,
+    failureClassification: input.failureClassification ?? null,
     clientAttemptedBytes: input.attemptedBytes,
     serverAcceptedBytes: receipt?.receivedBytes ?? null,
     serverReceiveDurationMs: receipt?.serverDurationMs ?? null,
@@ -195,6 +225,25 @@ function diagnostic(input: {
     outcome: input.outcome,
     failureReason: input.failureReason,
   };
+}
+
+function classifyFailure(
+  error: unknown,
+  response: Response | null,
+  signal: AbortSignal,
+  parentSignal: AbortSignal,
+): CapacityFailureClassification {
+  if (parentSignal.aborted) return "parent-cancellation";
+  if (signal.aborted && signal.reason === "setup-timeout") return "endpoint-setup-timeout";
+  if (signal.aborted && signal.reason === "duration") return "premature-duration-abort";
+  if (typeof document !== "undefined" && document.visibilityState === "hidden") return "browser-interruption";
+  if (response !== null && !response.ok) return "endpoint-http-error";
+  const message = errorText(error).toLowerCase();
+  if (message.includes("response body unavailable")) return "response-body-unavailable";
+  if (message.includes("response body empty")) return "response-body-empty";
+  if (message.includes("compressed measurement response")) return "compressed-response-rejected";
+  if (error instanceof TypeError) return "cors-or-network-fetch-failure";
+  return "unknown-endpoint-failure";
 }
 
 function randomPayload(bytes: number): ArrayBuffer {
@@ -210,6 +259,10 @@ function errorText(error: unknown): string {
 }
 
 async function warmup(plan: CapacityPlan, signal: AbortSignal, callbacks: CapacityCallbacks): Promise<WarmupResult> {
+  const controller = new AbortController();
+  const abortFromParent = () => controller.abort(signal.reason);
+  signal.addEventListener("abort", abortFromParent, { once: true });
+  const setupTimer = setTimeout(() => controller.abort("setup-timeout"), plan.setupTimeoutMs);
   const stageId = `${plan.direction}-warmup`;
   const url = measurementUrl(plan.direction === "download"
     ? downloadUrl(plan.downloadUrlTemplate, plan.warmupBytes)
@@ -225,11 +278,10 @@ async function warmup(plan: CapacityPlan, signal: AbortSignal, callbacks: Capaci
       method: plan.direction === "upload" ? "POST" : "GET",
       ...(body ? { body } : {}),
       cache: "no-store",
-      signal,
+      signal: controller.signal,
     });
     responseAtMs = performance.now();
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    assertUncompressed(response);
     if (plan.direction === "upload") {
       bytes = headerInteger(response.headers.get("cf-meta-upload-bytes")) ?? plan.warmupBytes;
     } else {
@@ -243,6 +295,8 @@ async function warmup(plan: CapacityPlan, signal: AbortSignal, callbacks: Capaci
       }
     }
     const endedAtMs = performance.now();
+    clearTimeout(setupTimer);
+    signal.removeEventListener("abort", abortFromParent);
     const item = diagnostic({
       plan, stageId, stage: "warmup", stageStreams: 1, streamId: 0, requestId: 0, url, startedAtMs,
       responseAtMs, firstByteAtMs, endedAtMs, bytes, response,
@@ -259,12 +313,20 @@ async function warmup(plan: CapacityPlan, signal: AbortSignal, callbacks: Capaci
     };
   } catch (error) {
     const endedAtMs = performance.now();
+    clearTimeout(setupTimer);
+    signal.removeEventListener("abort", abortFromParent);
     const item = diagnostic({
       plan, stageId, stage: "warmup", stageStreams: 1, streamId: 0, requestId: 0, url, startedAtMs,
       responseAtMs, firstByteAtMs, endedAtMs, bytes, response,
       attemptedBytes: plan.direction === "upload" ? plan.warmupBytes : 0,
-      outcome: signal.aborted ? "aborted" : "failed",
-      failureReason: signal.aborted ? "Measurement cancelled." : errorText(error),
+      outcome: controller.signal.aborted ? "aborted" : "failed",
+      failureReason: signal.aborted
+        ? "Measurement cancelled."
+        : controller.signal.reason === "setup-timeout"
+          ? "Warm-up stopped: setup-timeout."
+          : errorText(error),
+      abortReason: controller.signal.aborted ? String(controller.signal.reason ?? "stop") : null,
+      failureClassification: classifyFailure(error, response, controller.signal, signal),
     });
     callbacks.onDiagnostic?.(item);
     if (signal.aborted) throw error;
@@ -292,7 +354,7 @@ async function latencyProbe(url: string, signal: AbortSignal): Promise<number | 
   }
 }
 
-async function runStage(
+export async function runCapacityStage(
   plan: CapacityPlan,
   stageId: string,
   streams: number,
@@ -302,6 +364,8 @@ async function runStage(
   byteBudget: number,
   callbacks: CapacityCallbacks,
   parentSignal: AbortSignal,
+  retryAttempt: 0 | 1 = 0,
+  configuredStreams = streams,
 ): Promise<CapacityStage & { rtts: number[] }> {
   const controller = new AbortController();
   const abortFromParent = () => controller.abort(parentSignal.reason);
@@ -310,27 +374,78 @@ async function runStage(
   // one incompressible body per stage and exclude its creation from the shared
   // measurement window, which matters on lower-power mobile devices.
   const uploadBody = plan.direction === "upload" ? randomPayload(requestBytes) : null;
-  const startedAt = performance.now();
+  const wallClockStartedAt = performance.now();
   const diagnostics: StreamDiagnostic[] = [];
   const rtts: number[] = [];
   const samples: number[] = [];
+  let firstRequestStartedAt: number | null = null;
+  let firstResponseAt: number | null = null;
+  let firstPayloadAt: number | null = null;
+  let measurementStartedAt: number | null = null;
   let bytes = 0;
   let windowBytes = 0;
-  let lastWindowAt = startedAt;
-  let lastProgressAt = startedAt;
+  let lastWindowAt: number | null = null;
+  let lastProgressAt = wallClockStartedAt;
   let failedRequests = 0;
   let failedProbes = 0;
   let durationExpired = false;
+  let setupExpired = false;
   let dataCapped = false;
   let statisticallyStable = false;
   let reservedUploadBytes = 0;
+  let sampleTimer: ReturnType<typeof setInterval> | null = null;
+  let durationTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const setupTimer = setTimeout(() => {
+    if (measurementStartedAt === null) {
+      setupExpired = true;
+      controller.abort("setup-timeout");
+    }
+  }, plan.setupTimeoutMs);
 
   const emitProgress = (force = false) => {
+    if (measurementStartedAt === null) return;
     const now = performance.now();
     if (!force && now - lastProgressAt < plan.progressIntervalMs) return;
     lastProgressAt = now;
-    const elapsed = now - startedAt;
+    const elapsed = now - measurementStartedAt;
     if (elapsed > 0) callbacks.onProgress?.(applicationMbps(bytes, elapsed), bytes, streams);
+  };
+  const maybeStopStatistically = (now: number) => {
+    if (
+      measurementStartedAt !== null &&
+      plan.allowEarlyStatisticalStop &&
+      now - measurementStartedAt >= requiredMinMs &&
+      bytes >= plan.stageMinBytes &&
+      samples.length >= plan.minValidSamples &&
+      coefficientOfVariation(samples) * 100 <= plan.maxVariationPct
+    ) {
+      statisticallyStable = true;
+      controller.abort("stable");
+    }
+  };
+  const startMeasurement = (at: number) => {
+    if (measurementStartedAt !== null) return;
+    measurementStartedAt = at;
+    firstPayloadAt = at;
+    lastWindowAt = at;
+    lastProgressAt = at;
+    clearTimeout(setupTimer);
+    sampleTimer = setInterval(() => {
+      const now = performance.now();
+      if (lastWindowAt === null) return;
+      const elapsed = now - lastWindowAt;
+      if (plan.direction === "download" && elapsed > 0 && windowBytes > 0) {
+        samples.push(applicationMbps(windowBytes, elapsed));
+      }
+      windowBytes = 0;
+      lastWindowAt = now;
+      maybeStopStatistically(now);
+    }, SAMPLE_INTERVAL_MS);
+    durationTimer = setTimeout(() => {
+      durationExpired = true;
+      controller.abort("duration");
+    }, stageMaxMs);
   };
   const countDownload = (amount: number) => {
     bytes += amount;
@@ -345,34 +460,6 @@ async function runStage(
     diagnostics.push(item);
     callbacks.onDiagnostic?.(item);
   };
-
-  const maybeStopStatistically = (now: number) => {
-    if (
-      plan.allowEarlyStatisticalStop &&
-      now - startedAt >= requiredMinMs &&
-      bytes >= plan.stageMinBytes &&
-      samples.length >= plan.minValidSamples &&
-      coefficientOfVariation(samples) * 100 <= plan.maxVariationPct
-    ) {
-      statisticallyStable = true;
-      controller.abort("stable");
-    }
-  };
-
-  const sampleTimer = setInterval(() => {
-    const now = performance.now();
-    const elapsed = now - lastWindowAt;
-    if (plan.direction === "download" && elapsed > 0 && windowBytes > 0) {
-      samples.push(applicationMbps(windowBytes, elapsed));
-    }
-    windowBytes = 0;
-    lastWindowAt = now;
-    maybeStopStatistically(now);
-  }, SAMPLE_INTERVAL_MS);
-  const durationTimer = setTimeout(() => {
-    durationExpired = true;
-    controller.abort("duration");
-  }, stageMaxMs);
 
   const probePromise = (async () => {
     while (!controller.signal.aborted) {
@@ -409,6 +496,8 @@ async function runStage(
         ? downloadUrl(plan.downloadUrlTemplate, requestBytes)
         : plan.uploadUrl, plan, stageId);
       const requestStarted = performance.now();
+      firstRequestStartedAt ??= requestStarted;
+      if (plan.direction === "upload") startMeasurement(requestStarted);
       let responseAt: number | null = null;
       let firstByteAt: number | null = null;
       let response: Response | null = null;
@@ -422,8 +511,8 @@ async function runStage(
           signal: controller.signal,
         });
         responseAt = performance.now();
+        firstResponseAt = firstResponseAt === null ? responseAt : Math.min(firstResponseAt, responseAt);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        assertUncompressed(response);
         if (plan.direction === "upload") {
           reservedUploadBytes -= requestBytes;
           const serverAcceptedBytes = headerInteger(response.headers.get("cf-meta-upload-bytes"));
@@ -445,11 +534,15 @@ async function runStage(
           for (;;) {
             const chunk = await reader.read();
             if (chunk.done) break;
-            if (firstByteAt === null && chunk.value.byteLength > 0) firstByteAt = performance.now();
+            if (firstByteAt === null && chunk.value.byteLength > 0) {
+              firstByteAt = performance.now();
+              startMeasurement(firstByteAt);
+            }
             requestTransferred += chunk.value.byteLength;
             countDownload(chunk.value.byteLength);
             if (controller.signal.aborted) break;
           }
+          if (requestTransferred === 0 && !controller.signal.aborted) throw new Error("Response body empty.");
           requestCompleted = !controller.signal.aborted;
         }
         emitDiagnostic(diagnostic({
@@ -458,6 +551,12 @@ async function runStage(
           endedAtMs: performance.now(), bytes: requestTransferred, attemptedBytes: plan.direction === "upload" ? requestBytes : 0, response,
           outcome: requestCompleted ? "completed" : "aborted",
           failureReason: requestCompleted ? null : `Stage stopped: ${String(controller.signal.reason ?? "stop")}.`,
+          measurementWindowStartedAtMs: measurementStartedAt,
+          measurementWindowEndedAtMs: measurementStartedAt === null ? null : performance.now(),
+          requestBytes,
+          stageByteBudget: byteBudget,
+          abortReason: requestCompleted ? null : String(controller.signal.reason ?? "stop"),
+          failureClassification: controller.signal.reason === "setup-timeout" ? "endpoint-setup-timeout" : null,
         }));
       } catch (error) {
         if (plan.direction === "upload" && reservedUploadBytes >= requestBytes) reservedUploadBytes -= requestBytes;
@@ -470,6 +569,12 @@ async function runStage(
           failureReason: controller.signal.aborted
             ? `Stage stopped: ${String(controller.signal.reason ?? "stop")}.`
             : errorText(error),
+          measurementWindowStartedAtMs: measurementStartedAt,
+          measurementWindowEndedAtMs: measurementStartedAt === null ? null : performance.now(),
+          requestBytes,
+          stageByteBudget: byteBudget,
+          abortReason: controller.signal.aborted ? String(controller.signal.reason ?? "stop") : null,
+          failureClassification: classifyFailure(error, response, controller.signal, parentSignal),
         }));
         if (!controller.signal.aborted) break;
       } finally {
@@ -480,33 +585,46 @@ async function runStage(
 
   await Promise.allSettled(workers);
   const endedAt = performance.now();
-  clearTimeout(durationTimer);
-  clearInterval(sampleTimer);
+  clearTimeout(setupTimer);
+  if (durationTimer !== null) clearTimeout(durationTimer);
+  if (sampleTimer !== null) clearInterval(sampleTimer);
   controller.abort("stage-complete");
   await probePromise;
   parentSignal.removeEventListener("abort", abortFromParent);
   if (parentSignal.aborted) throw parentSignal.reason ?? new DOMException("Aborted", "AbortError");
 
-  const tailElapsed = endedAt - lastWindowAt;
+  const measurementEndedAt = measurementStartedAt === null ? null : endedAt;
+  const tailElapsed = lastWindowAt === null ? 0 : endedAt - lastWindowAt;
   if (plan.direction === "download" && tailElapsed >= 200 && windowBytes > 0) {
     samples.push(applicationMbps(windowBytes, tailElapsed));
   }
-  const durationMs = endedAt - startedAt;
-  if (bytes <= 0 || durationMs <= 0) throw new Error(`${plan.direction} capacity stage transferred no usable data.`);
-  const aggregateMbps = applicationMbps(bytes, durationMs);
+  const durationMs = measurementStartedAt === null ? 0 : endedAt - measurementStartedAt;
+  const aggregateMbps = bytes > 0 && durationMs > 0 ? applicationMbps(bytes, durationMs) : 0;
   emitProgress(true);
   const stableSamples = samples.length > 2 ? samples.slice(1) : samples;
   const variation = coefficientOfVariation(stableSamples);
   const provisional: CapacityStage = {
     stageId,
     streams,
+    configuredStreams,
+    retryAttempt,
+    recoveredFromFailure: retryAttempt === 1 && bytes > 0,
+    recoveryReason: null,
+    wallClockStartedAtMs: wallClockStartedAt,
+    firstRequestStartedAtMs: firstRequestStartedAt,
+    firstResponseAtMs: firstResponseAt,
+    firstPayloadAtMs: firstPayloadAt,
+    measurementStartedAtMs: measurementStartedAt,
+    measurementEndedAtMs: measurementEndedAt,
+    wallClockDurationMs: endedAt - wallClockStartedAt,
+    stageByteBudget: byteBudget,
     aggregateMbps,
     medianMbps: stableSamples.length ? median(stableSamples) : aggregateMbps,
     trimmedMeanMbps: stableSamples.length ? interquartileMean(stableSamples) : aggregateMbps,
     p5Mbps: stableSamples.length ? percentile(stableSamples, 5) : aggregateMbps,
     p50Mbps: stableSamples.length ? percentile(stableSamples, 50) : aggregateMbps,
     p95Mbps: stableSamples.length ? percentile(stableSamples, 95) : aggregateMbps,
-    peakMbps: Math.max(aggregateMbps, max(stableSamples)),
+    peakMbps: stableSamples.length > 0 ? Math.max(aggregateMbps, max(stableSamples)) : aggregateMbps,
     variationPct: Math.round(variation * 1000) / 10,
     coefficientOfVariation: variation,
     samples: stableSamples,
@@ -514,10 +632,22 @@ async function runStage(
     bytes,
     durationMs,
     requestBytes,
+    requestCount: diagnostics.length,
+    completedRequests: diagnostics.filter((item) => item.outcome === "completed").length,
     failedRequests,
     failedProbes,
     improvementPct: null,
-    stopReason: statisticallyStable ? "stable" : dataCapped ? "data-cap" : durationExpired ? "duration" : failedRequests > 0 ? "error" : "completed",
+    stopReason: setupExpired
+      ? "setup-timeout"
+      : statisticallyStable
+        ? "stable"
+        : dataCapped
+          ? "data-cap"
+          : durationExpired
+            ? "duration"
+            : failedRequests > 0 || bytes <= 0
+              ? "error"
+              : "completed",
     rampState: "ramping",
     endpointHealth: plan.endpointHealth,
     qualification: emptyQualification(),
@@ -525,6 +655,59 @@ async function runStage(
   };
   provisional.qualification = qualifyCapacityStage(provisional, plan.direction, qualificationRequirements(plan, requiredMinMs));
   return { ...provisional, rtts };
+}
+
+async function runStageWithRecovery(
+  plan: CapacityPlan,
+  stageId: string,
+  streams: number,
+  stageMaxMs: number,
+  requiredMinMs: number,
+  requestBytes: number,
+  byteBudget: number,
+  callbacks: CapacityCallbacks,
+  parentSignal: AbortSignal,
+): Promise<CapacityStage & { rtts: number[] }> {
+  const first = await runCapacityStage(
+    plan,
+    stageId,
+    streams,
+    stageMaxMs,
+    requiredMinMs,
+    requestBytes,
+    byteBudget,
+    callbacks,
+    parentSignal,
+    0,
+    streams,
+  );
+  if (first.bytes > 0 || parentSignal.aborted) return first;
+
+  const reason = first.diagnostics.find((item) => item.failureClassification)?.failureClassification
+    ?? (first.stopReason === "setup-timeout" ? "endpoint-setup-timeout" : "response-body-empty");
+  const retryStreams = Math.max(1, Math.floor(streams / 2));
+  const retryBytes = Math.max(1, Math.min(Math.floor(requestBytes / 2), byteBudget));
+  const retry = await runCapacityStage(
+    plan,
+    `${stageId}-retry`,
+    retryStreams,
+    stageMaxMs,
+    requiredMinMs,
+    retryBytes,
+    byteBudget,
+    callbacks,
+    parentSignal,
+    1,
+    streams,
+  );
+  retry.diagnostics = [...first.diagnostics, ...retry.diagnostics];
+  retry.requestCount = (first.requestCount ?? first.diagnostics.length) + (retry.requestCount ?? retry.diagnostics.length);
+  retry.completedRequests = (first.completedRequests ?? 0) + (retry.completedRequests ?? 0);
+  retry.failedRequests += first.failedRequests;
+  retry.failedProbes += first.failedProbes;
+  retry.recoveredFromFailure = retry.bytes > 0;
+  retry.recoveryReason = reason;
+  return retry;
 }
 
 export type StageQualificationRequirements = {
@@ -576,10 +759,14 @@ export function qualifyCapacityStage(
     item.outcome === "aborted" && /^Stage stopped: (?:data-cap|duration|stable)\./.test(item.failureReason ?? "")
   );
   const completionQualified = stage.stopReason !== "error"
-    && stage.failedRequests === 0
+    && (stage.failedRequests === 0 || stage.recoveredFromFailure === true)
     && (completedDiagnostics.length > 0 || intentionallyStopped);
-  const compressionQualified = responseDiagnostics.length > 0 && responseDiagnostics.every((item) =>
-    item.contentEncoding === null || item.contentEncoding.toLowerCase() === "identity"
+  // Content coding on the small upload acknowledgement does not alter the
+  // request-body byte accounting. For downloads, Fetch returns decoded bytes,
+  // so encoded evidence remains usable only as an estimate and never as a
+  // fully qualified wire-capacity measurement.
+  const compressionQualified = direction === "upload" || (
+    responseDiagnostics.length > 0 && responseDiagnostics.every((item) => !hasNonIdentityEncoding(item))
   );
   const cacheQualified = responseDiagnostics.length > 0 && responseDiagnostics.every((item) => {
     const value = item.cacheControl?.toLowerCase() ?? "";
@@ -597,9 +784,7 @@ export function qualifyCapacityStage(
   const receiptMismatch = direction === "upload" && completedDiagnostics.some((item) =>
     item.uploadReceipt?.status === "mismatch" || item.uploadReceipt?.status === "invalid"
   );
-  const contentMismatch = direction === "download" && completedDiagnostics.some((item) =>
-    item.contentLength !== null && item.contentLength !== item.bytes
-  );
+  const contentMismatch = direction === "download" && completedDiagnostics.some(downloadPayloadMismatch);
   const finite = Number.isFinite(stage.aggregateMbps) && stage.aggregateMbps > 0 && stage.bytes > 0 && stage.durationMs > 0;
 
   if (!durationQualified) reasons.push(`Duration ${Math.round(stage.durationMs)} ms was below the ${requirements.minDurationMs} ms minimum.`);
@@ -608,7 +793,10 @@ export function qualifyCapacityStage(
   if (!variationQualified) reasons.push(`Variation ${stage.variationPct.toFixed(1)}% exceeded the ${requirements.maxVariationPct}% limit.`);
   if (!endpointQualified) reasons.push(`Endpoint health was ${stage.endpointHealth}, not healthy.`);
   if (!completionQualified) reasons.push("The stage did not complete without transfer failures.");
-  if (!compressionQualified) reasons.push("A completed response used content encoding.");
+  if (stage.recoveredFromFailure) reasons.push("The stage recovered after one classified zero-byte attempt.");
+  if (!compressionQualified) {
+    reasons.push("A completed download used content encoding; decoded application bytes are retained only as estimate evidence.");
+  }
   if (!cacheQualified) reasons.push("No-store/no-cache response evidence was incomplete.");
   if (!receiptQualified && direction === "upload") reasons.push("Upload receipt evidence was missing, duplicated, or incomplete.");
   if (duplicateReceipt) reasons.push("A duplicate upload receipt ID was observed.");
@@ -616,7 +804,7 @@ export function qualifyCapacityStage(
   if (contentMismatch) reasons.push("Completed download bytes did not match Content-Length.");
   if (!finite) reasons.push("Stage has no finite positive aggregate measurement.");
 
-  const hardRejected = !finite || !completionQualified || !compressionQualified || receiptMismatch || contentMismatch || duplicateReceipt;
+  const hardRejected = !finite || !completionQualified || receiptMismatch || contentMismatch || duplicateReceipt;
   const fullyQualified = durationQualified && bytesQualified && samplesQualified && variationQualified
     && endpointQualified && completionQualified && receiptQualified && cacheQualified && compressionQualified;
   return {
@@ -869,16 +1057,16 @@ export async function measureCapacity(
   const warm = await warmup(plan, signal, callbacks);
   const stages: Array<CapacityStage & { rtts: number[] }> = [];
   let consumedBytes = warm.bytes;
+  let measuredDurationMs = 0;
   let previousMbps = warm.transferMbps;
   const stageWeights = capacityStageBudgetWeights(plan.streamRamp.length, plan.profileMode);
 
   for (let index = 0; index < plan.streamRamp.length; index += 1) {
-    if (signal.aborted || consumedBytes >= plan.maxBytes || performance.now() - startedAt >= plan.maxDurationMs) break;
+    if (signal.aborted || consumedBytes >= plan.maxBytes || measuredDurationMs >= plan.maxDurationMs) break;
     const streams = plan.streamRamp[index];
     const stageId = `${plan.direction}-${index + 1}-${streams}s`;
     callbacks.onStage?.("measurement", streams);
-    const elapsed = performance.now() - startedAt;
-    const remainingDuration = Math.max(500, plan.maxDurationMs - elapsed);
+    const remainingDuration = Math.max(500, plan.maxDurationMs - measuredDurationMs);
     const wantedDuration = index === plan.streamRamp.length - 1 ? plan.finalStageMinMs : plan.stageMaxMs;
     const requiredMinMs = index === plan.streamRamp.length - 1 ? plan.finalStageMinMs : plan.stageMinMs;
     const stageDuration = Math.min(wantedDuration, remainingDuration);
@@ -889,7 +1077,7 @@ export async function measureCapacity(
       : Math.max(1, Math.min(remainingBytes, configuredBudget));
     const size = requestSize(plan, previousMbps, streams);
     const bytesBeforeStage = consumedBytes;
-    const stage = await runStage(plan, stageId, streams, stageDuration, requiredMinMs, size, stageByteBudget, {
+    const stage = await runStageWithRecovery(plan, stageId, streams, stageDuration, requiredMinMs, size, stageByteBudget, {
       ...callbacks,
       onProgress: (mbps, stageBytes, activeStreams) => callbacks.onProgress?.(
         mbps,
@@ -911,13 +1099,15 @@ export async function measureCapacity(
           : "ramping";
     stages.push(stage);
     consumedBytes += stage.bytes;
+    measuredDurationMs += stage.durationMs;
+    if (stage.bytes <= 0) break;
     previousMbps = stage.aggregateMbps;
     const comparableWindows = previous !== undefined
       && previous.durationMs >= plan.stageMinMs
       && stage.durationMs >= plan.stageMinMs;
     if (comparableWindows && improvementPct !== null && improvementPct < plan.improvementThresholdPct) {
       const remainingBytesAfterStage = plan.maxBytes - consumedBytes;
-      const remainingMsAfterStage = plan.maxDurationMs - (performance.now() - startedAt);
+      const remainingMsAfterStage = plan.maxDurationMs - measuredDurationMs;
       if (
         stage.durationMs < plan.finalStageMinMs &&
         remainingBytesAfterStage > 0 &&
@@ -928,7 +1118,7 @@ export async function measureCapacity(
         const confirmationDuration = Math.min(plan.finalStageMinMs, remainingMsAfterStage);
         const confirmationSize = requestSize(plan, stage.aggregateMbps, streams);
         const bytesBeforeConfirmation = consumedBytes;
-        const confirmation = await runStage(
+        const confirmation = await runStageWithRecovery(
           plan,
           confirmationId,
           streams,
@@ -985,13 +1175,8 @@ export async function measureCapacity(
   if (allDiagnostics.some((item) => item.contentEncoding !== null && item.contentEncoding !== "identity")) {
     reasons.push("A response reported content encoding; application byte accounting may not represent wire bytes.");
   }
-  if (allDiagnostics.some((item) =>
-    item.direction === "download" &&
-    item.outcome === "completed" &&
-    item.contentLength !== null &&
-    item.contentLength !== item.bytes
-  )) {
-    reasons.push("A completed download did not match the endpoint Content-Length.");
+  if (allDiagnostics.some(downloadPayloadMismatch)) {
+    reasons.push("A completed download did not match the endpoint's requested payload size or unencoded Content-Length.");
   }
   if (selection.excludedReasons.some((reason) => reason.includes("upload receipt"))) {
     reasons.push("An upload receipt did not match the application payload count.");

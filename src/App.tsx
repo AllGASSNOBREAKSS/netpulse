@@ -18,6 +18,7 @@ import { useGaugeMotion } from "@/hooks/use-gauge-motion";
 import { listServerOptions, type ServerOption } from "@/lib/servers";
 import { isCancellation } from "@/lib/cancellation";
 import type { MeasurementEvent } from "@/lib/measurementPipeline";
+import { VisualTelemetry } from "@/lib/visualTelemetry";
 
 // Chart-heavy pages load on demand so recharts stays out of the main bundle.
 const ResultsPage = lazy(() => import("@/pages/Results").then((m) => ({ default: m.ResultsPage })));
@@ -47,8 +48,22 @@ const PHASE_LABEL: Record<Phase, string> = {
   packetloss: "Analysis — UDP reachability",
   done: "Test complete",
   cancelled: "Test cancelled — incomplete measurements were discarded",
-  error: "Test failed — check your connection and retry",
+  error: "Connection test incomplete",
 };
+
+function measurementErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  if (message.includes("setup-timeout") || message.includes("setup timeout")) {
+    return "The measurement endpoint did not begin transferring data before the setup timeout. Partial values were discarded.";
+  }
+  if (message.includes("cors") || message.includes("network") || message.includes("fetch")) {
+    return "The browser could not reach the measurement endpoint. Check network filtering or try again; partial values were discarded.";
+  }
+  if (message.includes("response body") || message.includes("usable data")) {
+    return "The endpoint returned no usable transfer data. NetPulse discarded the incomplete measurement.";
+  }
+  return "The measurement could not complete. Partial values were discarded and were not saved.";
+}
 
 function samplesFromEvents(events: MeasurementEvent[]): Sample[] {
   return events.flatMap((event) => {
@@ -78,6 +93,8 @@ export default function App() {
   const [lowData, setLowData] = useState(false);
   const [liveDown, setLiveDown] = useState<number | null>(null);
   const [liveUp, setLiveUp] = useState<number | null>(null);
+  const [visualDown, setVisualDown] = useState<number | null>(null);
+  const [visualUp, setVisualUp] = useState<number | null>(null);
   const [liveSamples, setLiveSamples] = useState<Sample[]>([]);
   const [openMetric, setOpenMetric] = useState<string | null>(null);
   const [showScore, setShowScore] = useState(false);
@@ -91,6 +108,8 @@ export default function App() {
   const [runError, setRunError] = useState<string | null>(null);
   const runningRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
+  const downloadVisualRef = useRef(new VisualTelemetry());
+  const uploadVisualRef = useRef(new VisualTelemetry());
 
   useEffect(() => {
     let current = true;
@@ -132,6 +151,10 @@ export default function App() {
     setVerdict(null);
     setLiveDown(null);
     setLiveUp(null);
+    setVisualDown(null);
+    setVisualUp(null);
+    downloadVisualRef.current.reset();
+    uploadVisualRef.current.reset();
     setLiveSamples([]);
     setPreflight(null);
     setServer(null);
@@ -158,6 +181,15 @@ export default function App() {
             const latestUpload = [...batch].reverse().find((sample) => sample.mbps !== undefined && sample.phase === "upload");
             if (latestDownload?.mbps !== undefined) setLiveDown(latestDownload.mbps);
             if (latestUpload?.mbps !== undefined) setLiveUp(latestUpload.mbps);
+            for (const sample of batch) {
+              if (sample.mbps === undefined) continue;
+              const visual = sample.phase === "upload"
+                ? uploadVisualRef.current.push(sample.mbps, sample.t)
+                : downloadVisualRef.current.push(sample.mbps, sample.t);
+              if (visual === null) continue;
+              if (sample.phase === "upload") setVisualUp(visual);
+              else setVisualDown(visual);
+            }
           },
         },
       );
@@ -204,10 +236,17 @@ export default function App() {
       if (isCancellation(error)) {
         setLiveDown(null);
         setLiveUp(null);
+        setVisualDown(null);
+        setVisualUp(null);
         setLiveSamples([]);
         setPhase("cancelled");
       } else {
-        setRunError(error instanceof Error ? error.message : "The measurement could not complete.");
+        setLiveDown(null);
+        setLiveUp(null);
+        setVisualDown(null);
+        setVisualUp(null);
+        setLiveSamples([]);
+        setRunError(measurementErrorMessage(error));
         setPhase("error");
       }
     } finally {
@@ -224,8 +263,8 @@ export default function App() {
   const publishedDownload = result?.publication.download.valueMbps ?? null;
   const publishedUpload = result?.publication.upload.valueMbps ?? null;
   const gaugeValues = useGaugeMotion({
-    download: phase === "done" && result ? publishedDownload ?? 0 : liveDown ?? 0,
-    upload: phase === "done" && result ? publishedUpload ?? 0 : liveUp ?? 0,
+    download: phase === "done" && result ? publishedDownload ?? 0 : visualDown ?? 0,
+    upload: phase === "done" && result ? publishedUpload ?? 0 : visualUp ?? 0,
   });
 
   /* ---- Speed Test page ---- */
@@ -251,7 +290,7 @@ export default function App() {
             label="Download"
             valueMbps={gaugeValues.download}
             active={isDownloadPhase}
-            done={phase === "done"}
+            done={phase === "done" || phase === "error" || phase === "cancelled"}
             hasMeasured={liveDown !== null || (phase === "done" && result !== null)}
             finalMbps={publishedDownload}
           />
@@ -259,7 +298,7 @@ export default function App() {
             label="Upload"
             valueMbps={gaugeValues.upload}
             active={isUploadPhase}
-            done={phase === "done"}
+            done={phase === "done" || phase === "error" || phase === "cancelled"}
             hasMeasured={liveUp !== null || (phase === "done" && result !== null)}
             finalMbps={publishedUpload}
           />

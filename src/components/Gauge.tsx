@@ -5,6 +5,7 @@ import {
   speedBand,
   speedToDialFraction,
 } from "@/lib/speedometer";
+import { gaugeNumeral } from "@/lib/gaugePresentation";
 
 const START = 135;
 const SWEEP = 270;
@@ -63,7 +64,7 @@ export function Gauge({
   const currentBand = speedBand(valueMbps);
   const speedColor = BAND_COLORS[currentBand];
   const idle = !active && !done && !hasMeasured;
-  const numeral = done && finalMbps === null ? "—" : formatValue(valueMbps);
+  const numeral = gaugeNumeral(valueMbps, done, finalMbps);
   const [capX, capY] = polar(angle, R_ARC);
 
   const status = done

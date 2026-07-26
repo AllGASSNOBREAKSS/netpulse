@@ -16,6 +16,7 @@ export type CapacityClientOptions = {
     maxBytes: number;
     maxRequestBytes: number;
     warmupBytes: number;
+    setupTimeoutMs: number;
     stageMinMs: number;
     stageMaxMs: number;
     finalStageMinMs: number;
@@ -48,6 +49,7 @@ function createPlan(options: CapacityClientOptions): CapacityPlan {
     maxBytes: options.profile.maxBytes,
     maxRequestBytes: options.profile.maxRequestBytes,
     warmupBytes: options.profile.warmupBytes,
+    setupTimeoutMs: options.profile.setupTimeoutMs,
     stageMinMs: options.profile.stageMinMs,
     stageMaxMs: options.profile.stageMaxMs,
     finalStageMinMs: options.profile.finalStageMinMs,
